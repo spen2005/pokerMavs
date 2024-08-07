@@ -1,0 +1,1 @@
+## Dallas Mavericks is going to win 2025 NBA championship

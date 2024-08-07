@@ -1,26 +1,41 @@
 from agents.mcts import MCTS
-from environment.state import transition, dealer_deals
+from pypokerengine.api.emulator import Emulator
+from pypokerengine.players import BasePokerPlayer
 
-# 初始化游戏环境和MCTS策略
-max_depth = 5
-mcts = MCTS(max_depth)
+class MCTSPlayer(BasePokerPlayer):
+    def __init__(self, max_depth=5):
+        self.mcts = MCTS(max_depth)
 
-# 假设T为总的游戏步数，batch_size为更新策略网络和价值函数的频率
-T = 1000
-batch_size = 10
+    def declare_action(self, valid_actions, hole_card, round_state):
+        # 选择一个随机动作作为示例
+        action = valid_actions[np.random.choice(len(valid_actions))]["action"]
+        return action, 0  # 第二个参数是动作的值，如跟注的金额
 
-for t in range(T):
-    if t % batch_size == 0:
-        mcts.value_function.update(mcts.dataset_v)
-        mcts.policy_network.update(mcts.dataset_p)
+    def receive_game_start_message(self, game_info):
+        pass
 
-    state = None  # 初始化状态
-    player = 0   # 当前玩家
+    def receive_round_start_message(self, round_count, hole_card, seats):
+        pass
 
-    if player != 0:  # 不是庄家回合
-        expected_value = mcts.mcts_strategy(state, player, 0, max_depth)
-        policy = mcts.policy_network.forward(state)
-        action = np.random.choice(len(policy), p=policy)
-        state = transition(state, action)
-    else:
-        state = transition(state, dealer_deals(state))
+    def receive_street_start_message(self, street, round_state):
+        pass
+
+    def receive_game_update_message(self, action, round_state):
+        pass
+
+    def receive_round_result_message(self, winners, hand_info, round_state):
+        pass
+
+if __name__ == "__main__":
+    # 初始化游戏
+    emulator = Emulator()
+    emulator.set_game_rule(nb_player=6, max_round=10, small_blind_amount=10, ante_amount=1)
+    
+    # 注册玩家
+    players = [MCTSPlayer() for _ in range(6)]
+    for i, player in enumerate(players):
+        emulator.register_player("player{}".format(i), player)
+    
+    # 模拟游戏
+    game_result = emulator.start_game()
+    print(game_result)
