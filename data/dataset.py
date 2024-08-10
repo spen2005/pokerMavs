@@ -1,9 +1,12 @@
 class Dataset:
-    def __init__(self, ...):
-        # 初始化數據集
+    def __init__(self):
+        self.data = []
 
-    def add(self, data):
-        # 添加數據到數據集
+    def add(self, item):
+        self.data.append(item)
 
-    def get_batch(self, batch_size):
-        # 獲取一個批次的數據
+    def __iter__(self):
+        return iter(self.data)
+
+    def clear(self):
+        self.data.clear()

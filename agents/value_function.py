@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from card_embedding import CardEmbedding
+from .card_embedding import CardEmbedding
 
 class ValueFunction(nn.Module):
     def __init__(self, card_types, state_dim, embed_dim):

@@ -1,16 +1,16 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from card_embedding import CardEmbedding
+from .card_embedding import CardEmbedding
 
-class ValueFunction(nn.Module):
-    def __init__(self, card_types, state_dim, embed_dim):
-        super(ValueFunction, self).__init__()
+class PolicyNetwork(nn.Module):
+    def __init__(self, card_types, state_dim, action_dim, embed_dim):
+        super(PolicyNetwork, self).__init__()
         self.card_embedding = CardEmbedding(card_types, embed_dim)
         self.state_fc = nn.Linear(state_dim, 128)
         self.card_fc = nn.Linear(embed_dim * card_types, 128)
         self.fc1 = nn.Linear(128 + 128, 128)
-        self.fc2 = nn.Linear(128, 1)  # Output a single value
+        self.fc2 = nn.Linear(128, action_dim)
     
     def forward(self, cards, state):
         card_embs = self.card_embedding(cards)
@@ -21,12 +21,13 @@ class ValueFunction(nn.Module):
         
         x = torch.cat([state_embs, card_embs], dim=-1)
         x = F.relu(self.fc1(x))
-        value = self.fc2(x)
-        return value
+        action_probs = F.softmax(self.fc2(x), dim=-1)
+        return action_probs
 
-    def evaluate(self, cards, state):
+    def select_action(self, cards, state):
         with torch.no_grad():
             cards = torch.tensor(cards, dtype=torch.long)
             state = torch.tensor(state, dtype=torch.float32)
-            value = self.forward(cards, state)
-        return value.item()
+            action_probs = self.forward(cards, state)
+            action = torch.multinomial(action_probs, 1).item()
+        return action

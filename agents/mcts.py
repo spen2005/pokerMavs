@@ -9,10 +9,10 @@ from environment.actions import Action
 import numpy as np
 
 class MCTS:
-    def __init__(self, max_depth, policy_network_params, value_function_params):
+    def __init__(self, max_depth, policy_network, value_function):
         self.max_depth = max_depth
-        self.policy_network = PolicyNetwork(**policy_network_params)
-        self.value_function = ValueFunction(**value_function_params)
+        self.policy_network = policy_network
+        self.value_function = value_function
         self.dataset_p = Dataset()
         self.dataset_v = Dataset()
         self.emulator = Emulator()
