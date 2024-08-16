@@ -1,32 +1,44 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .card_embedding import CardEmbedding
+from .card_embedding import PokerHandEvaluator
 
 class ValueFunction(nn.Module):
-    def __init__(self, card_types, state_dim, embed_dim):
+    def __init__(self, num_players, num_hand_categories):
         super(ValueFunction, self).__init__()
-        self.card_embedding = CardEmbedding(card_types, embed_dim)
-        self.state_fc = nn.Linear(state_dim, 128)
-        self.card_fc = nn.Linear(embed_dim * card_types, 128)
-        self.fc1 = nn.Linear(128 + 128, 128)
-        self.fc2 = nn.Linear(128, 1)  # Output a single value
+        self.num_players = num_players
+        self.num_hand_categories = num_hand_categories
+        
+        # 输入层：每个玩家的手牌强度矩阵 + 底池大小
+        input_dim = num_players * num_hand_categories + 1
+        
+        self.fc1 = nn.Linear(input_dim, 128)
+        self.fc2 = nn.Linear(128, 64)
+        self.fc3 = nn.Linear(64, num_players)  # 输出每个玩家的期望收益
     
-    def forward(self, cards, state):
-        card_embs = self.card_embedding(cards)
-        card_embs = card_embs.sum(dim=1)  # Sum across cards
+    def forward(self, hand_strengths, pot):
+        # hand_strengths: [batch_size, num_players, num_hand_categories]
+        # pot: [batch_size, 1]
         
-        state_embs = F.relu(self.state_fc(state))
-        card_embs = F.relu(self.card_fc(card_embs))
+        batch_size = hand_strengths.size(0)
+        x = hand_strengths.view(batch_size, -1)  # 展平手牌强度矩阵
+        x = torch.cat([x, pot], dim=1)  # 连接底池大小
         
-        x = torch.cat([state_embs, card_embs], dim=-1)
         x = F.relu(self.fc1(x))
-        value = self.fc2(x)
-        return value
+        x = F.relu(self.fc2(x))
+        expected_payoffs = self.fc3(x)
+        
+        return expected_payoffs
 
-    def evaluate(self, cards, state):
+    def evaluate(self, hand_strengths, pot):
         with torch.no_grad():
-            cards = torch.tensor(cards, dtype=torch.long)
-            state = torch.tensor(state, dtype=torch.float32)
-            value = self.forward(cards, state)
-        return value.item()
+            hand_strengths = torch.tensor(hand_strengths, dtype=torch.float32)
+            pot = torch.tensor([[pot]], dtype=torch.float32)
+            expected_payoffs = self.forward(hand_strengths, pot)
+        return expected_payoffs.squeeze().tolist()
+
+# 使用示例
+# evaluator = PokerHandEvaluator()
+# value_function = ValueFunction(num_players=6, num_hand_categories=10)
+# hand_strengths = [evaluator.evaluate(player_cards) for player_cards in all_player_cards]
+# expected_payoffs = value_function.evaluate(hand_strengths, pot_size)
