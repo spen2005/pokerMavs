@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .card_embedding import PokerHandEvaluator
+from .PHE import PokerHandEvaluator
 
 class ValueFunction(nn.Module):
     def __init__(self, num_players, num_hand_categories):
@@ -9,8 +9,8 @@ class ValueFunction(nn.Module):
         self.num_players = num_players
         self.num_hand_categories = num_hand_categories
         
-        # 输入层：每个玩家的手牌强度矩阵 + 底池大小
-        input_dim = num_players * num_hand_categories + 1
+        # 输入层：每个玩家的手牌强度矩阵 + 底池大小 + 輪數
+        input_dim = num_players * num_hand_categories + 1 + 1
         
         self.fc1 = nn.Linear(input_dim, 128)
         self.fc2 = nn.Linear(128, 64)
@@ -19,6 +19,7 @@ class ValueFunction(nn.Module):
     def forward(self, hand_strengths, pot):
         # hand_strengths: [batch_size, num_players, num_hand_categories]
         # pot: [batch_size, 1]
+        # round: [batch_size, 1]
         
         batch_size = hand_strengths.size(0)
         x = hand_strengths.view(batch_size, -1)  # 展平手牌强度矩阵
