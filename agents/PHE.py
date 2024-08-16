@@ -40,6 +40,9 @@ class PokerHandEvaluator:
         return Counter(ranks)
 
     def type_of_hand_kicker(self, cards):
+        # Convert card format if necessary
+        cards = [self.convert_card_format(card) for card in cards]
+        
         # the input would be 7 cards, texas poker has 5 cards, so we need to find the best 5 cards
         # 1. determine whether it is straight flush
         for i in range(14, 4, -1):
@@ -117,6 +120,11 @@ class PokerHandEvaluator:
         matrix = np.zeros((13, 9))
         matrix[14-max_rank, 8] = 1
         return matrix
+
+    def convert_card_format(self, card):
+        rank = card[:-1]
+        suit = card[-1]
+        return f"{rank.zfill(2)}{suit}"  # Ensure rank is always two digits for consistency
 
     def monte_carlo_simulation(self, known_cards, num_samples=100000):
         all_cards = [f"{rank}{suit}" for rank in range(2, 15) for suit in ['H', 'D', 'S', 'C']]
@@ -286,7 +294,7 @@ class PokerHandEvaluator:
         input_cards = [card.replace('14', 'A').replace('13', 'K').replace('12', 'Q').replace('11', 'J') for card in input_cards]
         # convert SHDC to ♠♥♦♣
         input_cards = [card.replace('H', '♠').replace('D', '♥').replace('S', '♦').replace('C', '♣') for card in input_cards]
-        # Should be ♠A ♦Q ♣4, the order should change to suit, rank
+        # Should be A ♦Q ♣4, the order should change to suit, rank
         input_cards = [card[1]+card[0] for card in input_cards]
         
         plt.title(f'Poker Hand Type Probabilities with Sum\nInput Cards: {", ".join(input_cards)}')
@@ -302,7 +310,7 @@ class PokerHandEvaluator:
 
 if __name__ == "__main__":
     evaluator = PokerHandEvaluator()
-    known_cards = ['4C']  # Example known cards
+    known_cards = ['8C', '2S', '5D', '11H', '5S']  # Example known cards
 
     start_time = time.time()
 

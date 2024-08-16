@@ -2,46 +2,36 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from environment.actions import ActionType, PREFLOP_ACTIONS, POSTFLOP_ACTIONS
+
 class PolicyNetwork(nn.Module):
-    def __init__(self, action_dim, num_players=6, hand_strength_dim=117, public_strength_dim=5):
+    def __init__(self, num_players=6):
         super(PolicyNetwork, self).__init__()
         
         self.num_players = num_players
         
-        # 计算输入维度
-        input_dim = hand_strength_dim + public_strength_dim + 5 + 2 * num_players
+        # Calculate input dimension
+        hand_strength_dim = 13 * 9  # 13x9 matrix flattened
+        public_strength_dim = 13 * 9  # 13x9 matrix flattened
+        other_inputs = 5 + 2 * num_players
+        input_dim = hand_strength_dim + public_strength_dim + other_inputs
         
-        # 输入层
-        self.input_fc = nn.Linear(input_dim, 128)
+        # Calculate action dimension
+        action_dim = len(ActionType) + len(PREFLOP_ACTIONS[ActionType.RAISE]) + len(POSTFLOP_ACTIONS[ActionType.BET]) - 2
         
-        # 隐藏层
-        self.fc1 = nn.Linear(128, 64)
-        self.fc2 = nn.Linear(64, 32)
+        # Input layer
+        self.input_fc = nn.Linear(input_dim, 256)
         
-        # 输出层
-        self.output_fc = nn.Linear(32, action_dim)
+        # Hidden layers
+        self.fc1 = nn.Linear(256, 128)
+        self.fc2 = nn.Linear(128, 64)
+        
+        # Output layer
+        self.output_fc = nn.Linear(64, action_dim)
     
-    def forward(self, game_state):
-        round_num, hand_strength, public_strength, my_position, active_players, \
-        player_status, player_bets, min_bet, max_bet = game_state
-        
-        # 将所有输入连接成一个向量
-        x = torch.cat([
-            round_num.unsqueeze(-1),
-            hand_strength.flatten(),
-            public_strength,
-            my_position.unsqueeze(-1),
-            active_players.unsqueeze(-1),
-            player_status,
-            player_bets,
-            min_bet.unsqueeze(-1),
-            max_bet.unsqueeze(-1)
-        ], dim=-1)
-        
-        # 通过网络层
+    def forward(self, x):
         x = F.relu(self.input_fc(x))
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         action_probs = F.softmax(self.output_fc(x), dim=-1)
-        
         return action_probs
