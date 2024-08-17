@@ -353,21 +353,22 @@ class MCTS:
         print("calculating hand strengths...")
         hand_strengths = []
         for player in game_state['table'].seats.players:
-            hole_cards = player.hole_card
-            if hole_cards:  # 如果有已知的手牌
-                community_cards = game_state['table'].get_community_card()
-                known_cards = self.convert_cards_to_phe_format(hole_cards + community_cards)
+            if hasattr(player, 'mcts_hole_card'):
+                hole_cards = player.mcts_hole_card
+                community_cards = game_state.get('mcts_community_card', [])
+                known_cards = hole_cards + community_cards
                 strength_matrix = self.phe.monte_carlo_simulation(known_cards)
-            else:  # 如果手牌未知
+            else:
                 strength_matrix = np.zeros((13, 9))  # 假設一個空的強度矩陣
             hand_strengths.append(strength_matrix)
+        
+        print(f"Hand strengths calculated for {len(hand_strengths)} players")
         return hand_strengths
 
     def calculate_public_strength(self, game_state):
         print("calculating public strength...")
-        community_cards = game_state['table'].get_community_card()
-        phe_format_cards = self.convert_cards_to_phe_format(community_cards)
-        return self.phe.monte_carlo_simulation(phe_format_cards)
+        community_cards = game_state.get('mcts_community_card', [])
+        return self.phe.monte_carlo_simulation(community_cards)
 
     def convert_cards_to_phe_format(self, cards):
         rank_map = {'A': '14', 'K': '13', 'Q': '12', 'J': '11', 'T': '10'}
@@ -375,7 +376,7 @@ class MCTS:
         
         converted_cards = []
         for card in cards:
-            print(f"Original card: {card}")  # 調試輸出
+            #print(f"Original card: {card}")  # 調試輸出
             if isinstance(card, Card):
                 rank = card.rank
                 suit = card.suit
@@ -403,24 +404,24 @@ class MCTS:
             converted_card = f"{new_rank}{new_suit}"
             converted_cards.append(converted_card)
         
-        print("converted cards:", converted_cards)  # 調試輸出
+        #print("converted cards:", converted_cards)  # 調試輸出
         return converted_cards
 
     def convert_game_state_cards(self, game_state):
         new_game_state = game_state.copy()
         
-        # 轉換公共牌
+        # 為 MCTS 邏輯創建轉換後的卡牌版本
         if 'table' in new_game_state:
             community_card = new_game_state['table'].get_community_card()
-            new_game_state['community_card'] = self.convert_cards_to_phe_format(community_card)
+            new_game_state['mcts_community_card'] = self.convert_cards_to_phe_format(community_card)
         else:
-            new_game_state['community_card'] = []
+            new_game_state['mcts_community_card'] = []
         
-        # 轉換玩家手牌
+        # 為 MCTS 邏輯創建轉換後的玩家手牌版本
         if 'table' in new_game_state and hasattr(new_game_state['table'], 'seats'):
             for player in new_game_state['table'].seats.players:
                 if player.hole_card:
-                    player.hole_card = self.convert_cards_to_phe_format(player.hole_card)
+                    player.mcts_hole_card = self.convert_cards_to_phe_format(player.hole_card)
         
         return new_game_state
 
