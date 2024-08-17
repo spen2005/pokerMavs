@@ -184,7 +184,7 @@ class MCTS:
             simulated_state, _ = self.emulator.apply_action(simulated_state, action['action'], action['amount'])
 
             while not self.is_round_end(simulated_state):
-                action = self.act(simulated_state, self.calculate_hand_strengths(simulated_state), self.calculate_public_strength(simulated_state))
+                action = self.act(simulated_state, hand_strengths, public_strength)
                 simulated_state, _ = self.emulator.apply_action(simulated_state, action['action'], action['amount'])
 
             value_input = self.prepare_value_input(simulated_state)
