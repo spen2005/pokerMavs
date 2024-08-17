@@ -15,6 +15,7 @@ from pypokerengine.engine.poker_constants import PokerConstants as Const
 from pypokerengine.engine.deck import Deck
 from pypokerengine.engine.player import Player
 from pypokerengine.engine.table import Table
+from environment.actions import ActionType, BettingStage, PREFLOP_ACTIONS, POSTFLOP_ACTIONS, get_action_space
 
 class MCTS:
     def __init__(self, policy_network, value_function, num_players=6, max_round=1, initial_stack=1000, small_blind_amount=5, ante_amount=0):
@@ -41,9 +42,12 @@ class MCTS:
         self.initial_state = initial_state
 
     def act(self, game_state, hand_strengths, public_strength):
-        # 轉換遊戲狀態中的卡牌
-        game_state = self.convert_game_state_cards(game_state)
-        
+        print(f"Current street: {game_state['street']}")
+        print(f"Current player: {game_state['next_player']}")
+        print(f"Current bet: {self.get_current_bet(game_state)}")
+        print(f"player's bet in this street: {self.get_player_bet(game_state, game_state['table'].seats.players[game_state['next_player']])}")
+        print(f"Total pot: {self.get_total_pot(game_state)}")
+
         betting_stage = BettingStage.PREFLOP if game_state['street'] == Const.Street.PREFLOP else BettingStage.POSTFLOP
         action_space = get_action_space(betting_stage)
 
@@ -54,98 +58,83 @@ class MCTS:
         current_player_index = game_state['next_player']
         current_player_hand_strengths = hand_strengths[current_player_index]
         
-        # 打印調試信息
-        print(f"Current player: {current_player.name}")
-        
         # 獲取策略網絡的輸出
         policy_input = self.prepare_policy_input(game_state, current_player_hand_strengths, public_strength)
         action_probs = self.policy_network(policy_input).detach().numpy().squeeze()
 
-        # 創建動作類型到索引的映射
-        action_to_index = {
-            ActionType.FOLD: 0,
-            ActionType.CALL: 1,
-            ActionType.ALL_IN: 2,
-            ActionType.RAISE: 3,
-            ActionType.BET: 3 + len(PREFLOP_ACTIONS[ActionType.RAISE])
-        }
-
-        # 過濾無效動作
+        # 獲取有效動作
         valid_actions = self.get_valid_actions(game_state, action_space)
+
+        # 過濾無效動作的概率
         valid_probs = []
         valid_actions_expanded = []
-        for action in valid_actions:
-            if action in [ActionType.FOLD, ActionType.CALL]:
-                valid_probs.append(action_probs[action_to_index[action]])
-                valid_actions_expanded.append(action)
-            elif action == ActionType.ALL_IN:
-                valid_probs.append(action_probs[action_to_index[action]])
-                valid_actions_expanded.append(ActionType.ALL_IN)
-            elif action == ActionType.RAISE and betting_stage == BettingStage.PREFLOP:
-                raise_probs = action_probs[action_to_index[ActionType.RAISE]:action_to_index[ActionType.RAISE]+len(action_space[ActionType.RAISE])]
-                valid_probs.extend(raise_probs)
-                valid_actions_expanded.extend([ActionType.RAISE] * len(raise_probs))
-            elif action == ActionType.BET and betting_stage == BettingStage.POSTFLOP:
-                bet_probs = action_probs[action_to_index[ActionType.BET]:action_to_index[ActionType.BET]+len(action_space[ActionType.BET])]
-                valid_probs.extend(bet_probs)
-                valid_actions_expanded.extend([ActionType.BET] * len(bet_probs))
+        for action, amount in valid_actions:
+            action_index = list(ActionType).index(action)
+            valid_probs.append(action_probs[action_index])
+            valid_actions_expanded.append((action, amount))
 
+        # 重新歸一化概率
         valid_probs = np.array(valid_probs)
-        valid_probs /= valid_probs.sum()  # 重新歸一化概率
+        if valid_probs.sum() > 0:
+            valid_probs /= valid_probs.sum()
+        else:
+            valid_probs = np.ones(len(valid_probs)) / len(valid_probs)  # 如果所有概率為0，則均分概率
 
         # 選擇動作
         chosen_action_index = np.random.choice(len(valid_probs), p=valid_probs)
-        chosen_action = valid_actions_expanded[chosen_action_index]
+        chosen_action, chosen_amount = valid_actions_expanded[chosen_action_index]
 
-        # 計算動作金額
-        current_player = game_state['table'].seats.players[game_state['next_player']]
-        
-        print(current_player.name)
-        print("acting...")
-        
-        if chosen_action == ActionType.FOLD:
-            amount = 0
-        elif chosen_action == ActionType.CALL:
-            amount = self.get_call_amount(game_state)
-        elif chosen_action == ActionType.ALL_IN:
-            amount = current_player.stack
-        elif chosen_action in [ActionType.RAISE, ActionType.BET]:
-            if betting_stage == BettingStage.PREFLOP:
-                raise_index = chosen_action_index - sum(1 for action in valid_actions_expanded[:chosen_action_index] if action != ActionType.RAISE)
-                amount = min(action_space[ActionType.RAISE][raise_index], current_player.stack)
-            else:  # POSTFLOP
-                bet_index = chosen_action_index - sum(1 for action in valid_actions_expanded[:chosen_action_index] if action != ActionType.BET)
-                amount = min(action_space[ActionType.BET][bet_index], current_player.stack)
-        else:
-            raise ValueError(f"Unknown action type: {chosen_action}")
+        print(f"chosen action: {chosen_action}, amount: {chosen_amount}")
+        return {'action': self.convert_action_type(chosen_action), 'amount': chosen_amount}
 
-        print(f"chosen action: {chosen_action}, amount: {amount}")
-        return {'action': self.convert_action_type(chosen_action), 'amount': amount}
+    def get_current_bet(self, game_state):
+        return max(player.paid_sum() for player in game_state['table'].seats.players)
+
+    def get_player_bet(self, game_state, player):
+        return player.paid_sum()
+
+    def get_min_raise(self, game_state):
+        current_bet = self.get_current_bet(game_state)
+        last_raise = game_state['small_blind_amount']  # 如果無法獲取上一次的 raise 金額，我們使用小盲作為最小 raise
+        return current_bet + max(last_raise, game_state['small_blind_amount'])
 
     def get_valid_actions(self, game_state, action_space):
-
         player = game_state['table'].seats.players[game_state['next_player']]
-        stack = player.stack
+        current_bet = self.get_current_bet(game_state)
+        player_bet = self.get_player_bet(game_state, player)
+        to_call = current_bet - player_bet
+        remaining_stack = player.stack
+
+        # 計算玩家在這條street之前的總投注
+        previous_streets_bet = player.paid_sum() - player_bet
+        print(f"Player {player.name} previous streets bet: {previous_streets_bet}")
+        print(f"Player {player.name} current street bet: {player_bet}")
+        print(f"Player {player.name} remaining stack: {remaining_stack}")
+        print(f"Current bet to call: {current_bet}")
+
         valid_actions = []
-        print(player.name)
-        print("getting valid actions...")
 
-        for action in action_space:
+        for action, values in action_space.items():
             if action == ActionType.FOLD:
-                valid_actions.append(action)
+                valid_actions.append((action, 0))
             elif action == ActionType.CALL:
-                if stack > 0:
-                    valid_actions.append(action)
+                if remaining_stack >= to_call:
+                    valid_actions.append((action, to_call))
             elif action == ActionType.RAISE:
-                if stack >= self.get_action_amount(action, game_state):
-                    valid_actions.append(action)
-            elif action == ActionType.ALL_IN:
-                if stack > 0:
-                    valid_actions.append(action)
+                for raise_multiplier in values:
+                    raise_amount = raise_multiplier * game_state['small_blind_amount'] * 2
+                    if raise_amount > current_bet and raise_amount <= remaining_stack + player_bet:
+                        valid_actions.append((action, raise_amount))
             elif action == ActionType.BET:
-                if stack > 0:
-                    valid_actions.append(action)
+                for bet_multiplier in values:
+                    bet_amount = int(bet_multiplier * self.get_total_pot(game_state))
+                    if bet_amount > current_bet and bet_amount <= remaining_stack + player_bet:
+                        valid_actions.append((action, bet_amount))
+            elif action == ActionType.ALL_IN:
+                if remaining_stack > 0:
+                    valid_actions.append((action, remaining_stack))
 
+        print(f"Valid actions for player {player.name}: {valid_actions}")
         return valid_actions
 
     def get_action_amount(self, action, game_state):
@@ -163,10 +152,32 @@ class MCTS:
         
     def mcts_strategy(self, game_state, num_samples=1000):
         print("computing mcts strategy...")
+        print("Game state structure:")
+        '''
+        for key, value in game_state.items():
+            print(f"{key}: {type(value)}")
+        
+        if 'table' in game_state:
+            print("Table structure:")
+            table = game_state['table']
+            for key, value in table.__dict__.items():
+                print(f"{key}: {type(value)}")
+            
+            print("Player structure:")
+            for player in table.seats.players:
+                print(f"Player {player.uuid}:")
+                for key, value in player.__dict__.items():
+                    print(f"  {key}: {type(value)}")
+                print(f"  round_action_histories: {player.round_action_histories}")
+        '''
         if self.is_game_end(game_state):
             return self.calculate_payoff(game_state), None, None
 
-        betting_stage = BettingStage.PREFLOP if game_state['street'] == Const.Street.PREFLOP else BettingStage.POSTFLOP
+        street_map = {Const.Street.PREFLOP: BettingStage.PREFLOP, 
+                      Const.Street.FLOP: BettingStage.POSTFLOP, 
+                      Const.Street.TURN: BettingStage.POSTFLOP, 
+                      Const.Street.RIVER: BettingStage.POSTFLOP}
+        betting_stage = street_map.get(game_state['street'], BettingStage.PREFLOP)
         action_space = get_action_space(betting_stage)
         num_players = len(game_state['table'].seats.players)
 
@@ -180,12 +191,14 @@ class MCTS:
         for _ in range(num_samples):
             simulated_state = game_state.copy()
             
-            action = self.act(simulated_state, hand_strengths, public_strength)
-            simulated_state, _ = self.emulator.apply_action(simulated_state, action['action'], action['amount'])
-
-            while not self.is_round_end(simulated_state):
-                action = self.act(simulated_state, hand_strengths, public_strength)
-                simulated_state, _ = self.emulator.apply_action(simulated_state, action['action'], action['amount'])
+            while not self.is_game_end(simulated_state):
+                while not self.is_round_end(simulated_state):
+                    action = self.act(simulated_state, hand_strengths, public_strength)
+                    simulated_state, _ = self.emulator.apply_action(simulated_state, action['action'], action['amount'])
+                
+                # 如果回合結束但遊戲沒有結束，進入下一個街道
+                if not self.is_game_end(simulated_state):
+                    simulated_state = self.move_to_next_street(simulated_state)
 
             value_input = self.prepare_value_input(simulated_state)
             payoffs = self.value_function.evaluate(*value_input)
@@ -260,7 +273,7 @@ class MCTS:
         if isinstance(pye_game_state, tuple):
             pye_game_state = pye_game_state[0]
         
-        print("Debug - pye_game_state keys:", pye_game_state.keys())
+        #print("Debug - pye_game_state keys:", pye_game_state.keys())
         
         game_state = {
             'round_count': pye_game_state.get('round_count', 0),
@@ -348,6 +361,15 @@ class MCTS:
         ])
 
         return policy_input.unsqueeze(0)  # 添加批次維度
+    
+    def prepare_value_input(self, game_state,hand_strengths):
+        pot = game_state['table'].get_total_pot()
+        
+        # 將手牌強度轉換為適合 ValueFunction 的格式
+        hand_strengths_tensor = torch.tensor([hs.flatten() for hs in hand_strengths]).unsqueeze(0)
+        pot_tensor = torch.tensor([[pot]]).float()
+        
+        return hand_strengths_tensor, pot_tensor
 
     def calculate_hand_strengths(self, game_state):
         print("calculating hand strengths...")
@@ -404,7 +426,7 @@ class MCTS:
             converted_card = f"{new_rank}{new_suit}"
             converted_cards.append(converted_card)
         
-        #print("converted cards:", converted_cards)  # 調試輸出
+        # print("All converted cards:", converted_cards)  # 調試輸出
         return converted_cards
 
     def convert_game_state_cards(self, game_state):
@@ -426,33 +448,29 @@ class MCTS:
         return new_game_state
 
     def is_round_end(self, game_state):
-        print("Debug - game_state type:", type(game_state))
-        if isinstance(game_state, dict):
-            print("Debug - game_state keys:", game_state.keys())
-        else:
-            print("Debug - game_state is not a dictionary")
-            return False
-        
-        if 'street' not in game_state:
-            print("Debug - 'street' not in game_state")
-            return False
-        
-        if game_state['street'] not in ['preflop', 'flop', 'turn', 'river']:
-            print(f"Debug - Unexpected street: {game_state['street']}")
-            return False
-        
-        if 'table' not in game_state:
-            print("Debug - 'table' not in game_state")
-            return False
-        
-        # 檢查是否所有玩家都已經行動
+        if game_state['street'] not in [Const.Street.PREFLOP, Const.Street.FLOP, Const.Street.TURN, Const.Street.RIVER]:
+            return True
+
         active_players = [player for player in game_state['table'].seats.players if player.is_active()]
         if len(active_players) <= 1:
             return True
+
+        # 檢查是否所有玩家的下注金額相等，且所有玩家都已行動
+        bet_amounts = [self.get_player_bet(game_state, player) for player in active_players]
+        all_equal = len(set(bet_amounts)) == 1
         
-        # 檢查是否所有玩家的下注金額相等
-        bet_amounts = [player.stack for player in active_players]
-        return len(set(bet_amounts)) == 1
+        # 檢查所有玩家是否都已經行動
+        all_acted = True
+        for player in active_players:
+            if not player.round_action_histories:
+                all_acted = False
+                break
+            current_street_actions = player.round_action_histories[-1]
+            if not current_street_actions or current_street_actions[-1]['action'] in ['SMALLBLIND', 'BIGBLIND']:
+                all_acted = False
+                break
+
+        return all_equal and all_acted
 
     def is_game_end(self, game_state):
         if isinstance(game_state, tuple):
@@ -514,3 +532,32 @@ class MCTS:
         current_player = game_state['table'].seats.players[game_state['next_player']]
         max_bet = max(player.stack for player in game_state['table'].seats.players)
         return min(max_bet - current_player.stack, current_player.stack)
+
+    def get_current_bet(self, game_state):
+        return max(self.get_player_bet(game_state, player) for player in game_state['table'].seats.players)
+
+    def get_player_bet(self, game_state, player):
+        return game_state['table'].get_total_pot() - player.stack + player.initial_stack
+
+    def get_min_raise(self, game_state):
+        current_bet = self.get_current_bet(game_state)
+        last_raise = game_state['small_blind_amount']  # 如果無法獲取上一次的 raise 金額，我們使用小盲作為最小 raise
+        return current_bet + max(last_raise, game_state['small_blind_amount'])
+
+    def move_to_next_street(self, game_state):
+        street_order = [Const.Street.PREFLOP, Const.Street.FLOP, Const.Street.TURN, Const.Street.RIVER]
+        current_street_index = street_order.index(game_state['street'])
+        if current_street_index < len(street_order) - 1:
+            game_state['street'] = street_order[current_street_index + 1]
+        else:
+            game_state['street'] = Const.Street.SHOWDOWN
+        return game_state
+    
+    def get_player_bet(self, game_state, player):
+        return player.paid_sum()
+
+    def get_current_bet(self, game_state):
+        return max(player.paid_sum() for player in game_state['table'].seats.players)
+
+    def get_total_pot(self, game_state):
+        return sum(player.paid_sum() for player in game_state['table'].seats.players)

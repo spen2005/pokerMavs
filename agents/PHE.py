@@ -126,7 +126,7 @@ class PokerHandEvaluator:
         suit = card[-1]
         return f"{rank.zfill(2)}{suit}"  # Ensure rank is always two digits for consistency
 
-    def monte_carlo_simulation(self, known_cards, num_samples=100000):
+    def monte_carlo_simulation(self, known_cards, num_samples=1000):
         all_cards = [f"{rank}{suit}" for rank in range(2, 15) for suit in ['H', 'D', 'S', 'C']]
         remaining_cards = list(set(all_cards) - set(known_cards))
 
