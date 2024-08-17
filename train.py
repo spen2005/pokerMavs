@@ -11,9 +11,9 @@ import numpy as np
 from pypokerengine.players import BasePokerPlayer
 
 class MCTSPlayer(BasePokerPlayer):
-    def __init__(self, policy_network, value_function):
+    def __init__(self, policy_network, value_function, num_players=6, max_round=1, initial_stack=1000, small_blind_amount=5):
         super().__init__()
-        self.mcts = MCTS(policy_network, value_function)
+        self.mcts = MCTS(policy_network, value_function, num_players, max_round, initial_stack, small_blind_amount)
         self.policy_network = policy_network
         self.value_function = value_function
         self.last_action_info = None
@@ -132,11 +132,15 @@ def train(num_games=1000, num_players=6, update_interval=5):
     policy_data = []
     value_data = []
 
-    config = setup_config(max_round=1, initial_stack=1000, small_blind_amount=5)
-    players = [MCTSPlayer(policy_network, value_function) for _ in range(num_players)]
+    max_round = 1
+    initial_stack = 1000
+    small_blind_amount = 5
+
+    config = setup_config(max_round=max_round, initial_stack=initial_stack, small_blind_amount=small_blind_amount)
+    players = [MCTSPlayer(policy_network, value_function, num_players, max_round, initial_stack, small_blind_amount) for _ in range(num_players)]
     for i, player in enumerate(players):
         config.register_player(name=f"player_{i}", algorithm=player)
-
+    
     for game in range(num_games):
         print(f"\n--- Starting Game {game + 1} ---")
         game_result = start_poker(config, verbose=0)

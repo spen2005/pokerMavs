@@ -5,14 +5,40 @@ from environment.actions import ActionType, get_action_space, BettingStage, PREF
 from .PHE import PokerHandEvaluator
 from pypokerengine.engine.poker_constants import PokerConstants as Const
 from pypokerengine.engine.hand_evaluator import HandEvaluator
+from pypokerengine.engine.table import Table
+from pypokerengine.engine.player import Player
+from pypokerengine.engine.deck import Deck
+from pypokerengine.engine.card import Card
+from pypokerengine.api.game import setup_config, start_poker
+from pypokerengine.api.emulator import Emulator
+from pypokerengine.engine.poker_constants import PokerConstants as Const
+from pypokerengine.engine.deck import Deck
+from pypokerengine.engine.player import Player
+from pypokerengine.engine.table import Table
 
 class MCTS:
-    def __init__(self, policy_network, value_function, num_players=6):
+    def __init__(self, policy_network, value_function, num_players=6, max_round=1, initial_stack=1000, small_blind_amount=5, ante_amount=0):
         self.policy_network = policy_network
         self.value_function = value_function
         self.num_players = num_players
         self.phe = PokerHandEvaluator()
+        
+        # 設置遊戲配置
+        self.config = setup_config(max_round=max_round, initial_stack=initial_stack, small_blind_amount=small_blind_amount)
+        
+        # 初始化 Emulator
         self.emulator = Emulator()
+        self.emulator.set_game_rule(num_players, max_round, small_blind_amount, ante_amount)
+        
+        # 創建初始遊戲狀態
+        players_info = {
+            f"player_{i}": {"name": f"player_{i}", "stack": initial_stack}
+            for i in range(num_players)
+        }
+        initial_state = self.emulator.generate_initial_game_state(players_info)
+        
+        # 設置 Emulator 的初始狀態
+        self.initial_state = initial_state
 
     def act(self, game_state, hand_strengths, public_strength):
         print("acting...")
@@ -126,10 +152,15 @@ class MCTS:
         public_strength = self.calculate_public_strength(game_state)
 
         for _ in range(num_samples):
-            simulated_state = self.emulator.apply_action(game_state, self.act(game_state,hand_strengths,public_strength))
+            pye_game_state = self.convert_to_pye_game_state(game_state)
             
+            action = self.act(game_state, hand_strengths, public_strength)
+            simulated_state = self.emulator.apply_action(pye_game_state, action['action'].value, action['amount'])
+
             while not self.is_round_end(simulated_state):
-                simulated_state = self.emulator.apply_action(simulated_state, self.act(simulated_state))
+                converted_state = self.convert_from_pye_game_state(simulated_state)
+                action = self.act(converted_state, self.calculate_hand_strengths(converted_state), self.calculate_public_strength(converted_state))
+                simulated_state = self.emulator.apply_action(simulated_state, action['action'].value, action['amount'])
 
             value_input = self.prepare_value_input(simulated_state)
             payoffs = self.value_function.evaluate(*value_input)
@@ -155,7 +186,74 @@ class MCTS:
         avg_expected_values = np.dot(old_policy, expected_values)
 
         return avg_expected_values, old_policy, new_policy
+    
+    def convert_to_pye_game_state(self, game_state):
+        table = Table()
+        
+        # 設置基本信息
+        table.dealer_btn = game_state.get('dealer_btn', 0)
+        table.set_blind_pos(game_state.get('sb_pos', 0), game_state.get('bb_pos', 1))
+        
+        # 設置玩家
+        for seat in game_state['seats']:
+            player = Player(seat['uuid'], seat['stack'], seat['name'])
+            player.hole_card = [Card.from_str(c) for c in seat.get('hole_card', [])]
+            player.state = seat['state']
+            table.seats.sitdown(player)
+        
+        # 設置社區牌
+        for card in game_state['community_card']:
+            table.add_community_card(Card.from_str(card))
+        
+        # 創建 PyPokerEngine 格式的遊戲狀態
+        pye_game_state = {
+            'round_count': game_state['round_count'],
+            'small_blind_amount': game_state['small_blind_amount'],
+            'street': game_state['street'],
+            'next_player': game_state['next_player'],
+            'table': table,
+            'pot': {'main': {'amount': game_state['pot']}},
+            'action_histories': {
+                'preflop': [],
+                'flop': [],
+                'turn': [],
+                'river': []
+            }
+        }
+        
+        # 設置牌組
+        deck = Deck()
+        deck.deck = [Card.from_str(c) for c in game_state.get('deck', [])]
+        pye_game_state['deck'] = deck
+        
+        return pye_game_state
 
+    def convert_from_pye_game_state(self, pye_game_state):
+        game_state = {
+            'round_count': pye_game_state['round_count'],
+            'small_blind_amount': pye_game_state['small_blind_amount'],
+            'street': pye_game_state['street'],
+            'next_player': pye_game_state['next_player'],
+            'community_card': [str(card) for card in pye_game_state['table'].get_community_card()],
+            'pot': pye_game_state['pot']['main']['amount'],
+            'seats': [],
+            'dealer_btn': pye_game_state['table'].dealer_btn,
+            'sb_pos': pye_game_state['table'].sb_pos,
+            'bb_pos': pye_game_state['table'].bb_pos,
+            'deck': [str(card) for card in pye_game_state['deck'].deck]
+        }
+        
+        for player in pye_game_state['table'].seats.players:
+            seat = {
+                'uuid': player.uuid,
+                'stack': player.stack,
+                'state': player.state,
+                'name': player.name,
+                'hole_card': [str(card) for card in player.hole_card]
+            }
+            game_state['seats'].append(seat)
+        
+        return game_state
 
     def prepare_policy_input(self, game_state, hand_strengths, public_strength):
         print("preparing policy input...")
