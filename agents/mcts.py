@@ -110,7 +110,7 @@ class MCTS:
         print(f"Player {player.name} previous streets bet: {previous_streets_bet}")
         print(f"Player {player.name} current street bet: {player_bet}")
         print(f"Player {player.name} remaining stack: {remaining_stack}")
-        print(f"Current bet to call: {current_bet}")
+        print(f"Current bet to call: {to_call}")
 
         valid_actions = []
 
@@ -132,7 +132,7 @@ class MCTS:
                         valid_actions.append((action, bet_amount))
             elif action == ActionType.ALL_IN:
                 if remaining_stack > 0:
-                    valid_actions.append((action, remaining_stack))
+                    valid_actions.append((action, player.paid_sum()+remaining_stack))
 
         print(f"Valid actions for player {player.name}: {valid_actions}")
         return valid_actions
