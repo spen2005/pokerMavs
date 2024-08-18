@@ -16,14 +16,14 @@ class ValueFunction(nn.Module):
         self.fc2 = nn.Linear(128, 64)
         self.fc3 = nn.Linear(64, num_players)  # 输出每个玩家的期望收益
     
-    def forward(self, hand_strengths, pot):
+    def forward(self, hand_strengths, pot, round):
         # hand_strengths: [batch_size, num_players, num_hand_categories]
         # pot: [batch_size, 1]
         # round: [batch_size, 1]
         
         batch_size = hand_strengths.size(0)
         x = hand_strengths.view(batch_size, -1)  # 展平手牌强度矩阵
-        x = torch.cat([x, pot], dim=1)  # 连接底池大小
+        x = torch.cat([x, pot, round], dim=1)  # 连接底池大小和轮数
         
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
@@ -31,11 +31,12 @@ class ValueFunction(nn.Module):
         
         return expected_payoffs
 
-    def evaluate(self, hand_strengths, pot):
+    def evaluate(self, hand_strengths, pot, round):
         with torch.no_grad():
             hand_strengths = torch.tensor(hand_strengths, dtype=torch.float32)
             pot = torch.tensor([[pot]], dtype=torch.float32)
-            expected_payoffs = self.forward(hand_strengths, pot)
+            round = torch.tensor([[round]], dtype=torch.float32)
+            expected_payoffs = self.forward(hand_strengths, pot, round)
         return expected_payoffs.squeeze().tolist()
 
 # 使用示例

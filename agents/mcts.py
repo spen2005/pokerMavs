@@ -191,8 +191,9 @@ class MCTS:
         for i in range(num_samples):
             print(f"=== sample {i+1} ===")
             simulated_state = game_state.copy()
+            street = simulated_state['street']
             # sample to the next street and evaluate the payoff using the value function
-            while not self.is_round_end(simulated_state):
+            while street == simulated_state['street']:
                 # print now street
                 print(f"now street: {simulated_state['street']}")
                 action = self.act(simulated_state, hand_strengths, public_strength)
@@ -200,13 +201,17 @@ class MCTS:
                 
             # 如果回合結束但遊戲沒有結束，進入下一個街道
             if not self.is_game_end(simulated_state):
+                print("game continued")
                 # print now street
                 print(f"now street: {simulated_state['street']}")
                 simulated_state = self.move_to_next_street(simulated_state)
-
-            value_input = self.prepare_value_input(simulated_state, hand_strengths)
-            payoffs = self.value_function.evaluate(*value_input)
             
+                value_input = self.prepare_value_input(simulated_state, hand_strengths)
+                payoffs = self.value_function.evaluate(*value_input)
+            else:
+                print("game ended")
+                payoffs = self.calculate_payoff(simulated_state)
+
             action_index = action_space.index(action['action'])
             expected_values[action_index] += np.array(payoffs) / num_samples
 
@@ -369,12 +374,14 @@ class MCTS:
     def prepare_value_input(self, game_state, hand_strengths):
         print("preparing value input...")
         pot = self.get_total_pot(game_state)  # Use the existing method to get the total pot
-        
+        round = game_state['round_count']
         # 將手牌強度轉換為適合 ValueFunction 的格式
         hand_strengths_tensor = torch.tensor([hs.flatten() for hs in hand_strengths]).unsqueeze(0)
         pot_tensor = torch.tensor([[pot]]).float()
+        # current round
+        round_tensor = torch.tensor([[round]], dtype=torch.float32)
         
-        return hand_strengths_tensor, pot_tensor
+        return hand_strengths_tensor, pot_tensor, round_tensor
 
     def calculate_hand_strengths(self, game_state):
         print("calculating hand strengths...")
@@ -483,32 +490,61 @@ class MCTS:
     def calculate_payoff(self, game_state):
         payoffs = [0] * self.num_players
         
-        # Ensure the game is at showdown stage
-        if game_state['street'] != Const.Street.SHOWDOWN:
-            raise ValueError("Game is not at showdown stage")
-
-        # Get all players who have not folded
-        active_players = [player for player in game_state['table'].seats.players if player.is_active()]
+        # Check if the game is finished
+        if game_state['street'] == Const.Street.FINISHED:
+            # Use PyPokerEngine to determine the winner and assign the pot
+            emulator = Emulator()
+            emulator.set_game_rule(self.num_players, game_state['round_count'], game_state['small_blind_amount'], 0)
+            final_state, events = emulator.run_until_game_finish(game_state)
+            
+            # Extract payoffs from the final state
+            for player in final_state['table'].seats.players:
+                initial_stack = next(p.initial_stack for p in game_state['table'].seats.players if p.uuid == player.uuid)
+                payoffs[game_state['table'].seats.players.index(player)] = player.stack - initial_stack
         
-        # Evaluate the hand strength of each player
-        for player in active_players:
-            player.hand_value = HandEvaluator.eval_hand(player.hole_card, game_state['table'].get_community_card())
+        # Check if the game is at showdown stage
+        elif game_state['street'] == Const.Street.SHOWDOWN:
+            # Get all players who have not folded
+            active_players = [player for player in game_state['table'].seats.players if player.is_active()]
+            
+            # Evaluate the hand strength of each player
+            for player in active_players:
+                player.hand_value = HandEvaluator.eval_hand(player.hole_card, game_state['table'].get_community_card())
 
-        # Sort players by hand strength
-        active_players.sort(key=lambda p: p.hand_value, reverse=True)
+            # Sort players by hand strength
+            active_players.sort(key=lambda p: p.hand_value, reverse=True)
 
-        # Distribute the main pot
-        main_pot = game_state['pot']['main']['amount']
-        self._assign_pot_to_winners(active_players, main_pot, payoffs)
+            # Distribute the main pot
+            main_pot = game_state['pot']['main']['amount']
+            self._assign_pot_to_winners(active_players, main_pot, payoffs)
 
-        # Distribute side pots
-        side_pots = game_state['pot'].get('side', [])
-        for side_pot in side_pots:
-            eligible_players = [p for p in active_players if p.stack > side_pot['amount']]
-            self._assign_pot_to_winners(eligible_players, side_pot['amount'], payoffs)
+            # Distribute side pots
+            side_pots = game_state['pot'].get('side', [])
+            for side_pot in side_pots:
+                eligible_players = [p for p in active_players if p.stack > side_pot['amount']]
+                self._assign_pot_to_winners(eligible_players, side_pot['amount'], payoffs)
+        
+        else:
+            # If the game is not at showdown, find the remaining active player
+            active_players = [player for player in game_state['table'].seats.players if player.is_active()]
+            if len(active_players) == 1:
+                # If only one player is active, they win the entire pot
+                winner = active_players[0]
+                winner_index = game_state['table'].seats.players.index(winner)
+                payoffs[winner_index] = self.get_total_pot(game_state)
+            else:
+                # Use PyPokerEngine to determine the winner and assign the pot
+                emulator = Emulator()
+                emulator.set_game_rule(self.num_players, game_state['round_count'], game_state['small_blind_amount'], 0)
+                final_state, events = emulator.run_until_game_finish(game_state)
+                
+                # Extract payoffs from the final state
+                for player in final_state['table'].seats.players:
+                    initial_stack = next(p.initial_stack for p in game_state['table'].seats.players if p.uuid == player.uuid)
+                    payoffs[game_state['table'].seats.players.index(player)] = player.stack - initial_stack
 
         return payoffs
-
+    
     def _assign_pot_to_winners(self, eligible_players, pot_amount, payoffs):
         if not eligible_players:
             return
