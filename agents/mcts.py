@@ -119,7 +119,7 @@ class MCTS:
                 valid_actions.append((action, 0))
             elif action == ActionType.CALL:
                 if remaining_stack >= to_call:
-                    valid_actions.append((action, to_call))
+                    valid_actions.append((action, to_call+player_bet))
             elif action == ActionType.RAISE:
                 for raise_multiplier in values:
                     raise_amount = raise_multiplier * game_state['small_blind_amount'] * 2
@@ -188,19 +188,23 @@ class MCTS:
         # calculate public strength
         public_strength = self.calculate_public_strength(game_state)
 
-        for _ in range(num_samples):
+        for i in range(num_samples):
+            print(f"=== sample {i+1} ===")
             simulated_state = game_state.copy()
-            
-            while not self.is_game_end(simulated_state):
-                while not self.is_round_end(simulated_state):
-                    action = self.act(simulated_state, hand_strengths, public_strength)
-                    simulated_state, _ = self.emulator.apply_action(simulated_state, action['action'], action['amount'])
+            # sample to the next street and evaluate the payoff using the value function
+            while not self.is_round_end(simulated_state):
+                # print now street
+                print(f"now street: {simulated_state['street']}")
+                action = self.act(simulated_state, hand_strengths, public_strength)
+                simulated_state, _ = self.emulator.apply_action(simulated_state, action['action'], action['amount'])
                 
-                # 如果回合結束但遊戲沒有結束，進入下一個街道
-                if not self.is_game_end(simulated_state):
-                    simulated_state = self.move_to_next_street(simulated_state)
+            # 如果回合結束但遊戲沒有結束，進入下一個街道
+            if not self.is_game_end(simulated_state):
+                # print now street
+                print(f"now street: {simulated_state['street']}")
+                simulated_state = self.move_to_next_street(simulated_state)
 
-            value_input = self.prepare_value_input(simulated_state)
+            value_input = self.prepare_value_input(simulated_state, hand_strengths)
             payoffs = self.value_function.evaluate(*value_input)
             
             action_index = action_space.index(action['action'])
@@ -362,8 +366,9 @@ class MCTS:
 
         return policy_input.unsqueeze(0)  # 添加批次維度
     
-    def prepare_value_input(self, game_state,hand_strengths):
-        pot = game_state['table'].get_total_pot()
+    def prepare_value_input(self, game_state, hand_strengths):
+        print("preparing value input...")
+        pot = self.get_total_pot(game_state)  # Use the existing method to get the total pot
         
         # 將手牌強度轉換為適合 ValueFunction 的格式
         hand_strengths_tensor = torch.tensor([hs.flatten() for hs in hand_strengths]).unsqueeze(0)
@@ -473,9 +478,7 @@ class MCTS:
         return all_equal and all_acted
 
     def is_game_end(self, game_state):
-        if isinstance(game_state, tuple):
-            game_state = game_state[0]
-        return game_state['street'] == Const.Street.SHOWDOWN
+        return game_state['street'] == Const.Street.SHOWDOWN or game_state['street'] == Const.Street.FINISHED
 
     def calculate_payoff(self, game_state):
         payoffs = [0] * self.num_players
@@ -545,7 +548,8 @@ class MCTS:
         return current_bet + max(last_raise, game_state['small_blind_amount'])
 
     def move_to_next_street(self, game_state):
-        street_order = [Const.Street.PREFLOP, Const.Street.FLOP, Const.Street.TURN, Const.Street.RIVER]
+        street_order = [Const.Street.PREFLOP, Const.Street.FLOP, Const.Street.TURN, Const.Street.RIVER, Const.Street.SHOWDOWN, Const.Street.FINISHED]
+        print(f"game_state['street']: {game_state['street']}")
         current_street_index = street_order.index(game_state['street'])
         if current_street_index < len(street_order) - 1:
             game_state['street'] = street_order[current_street_index + 1]
