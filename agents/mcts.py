@@ -240,6 +240,7 @@ class MCTS:
         current_player = game_state['next_player']
         current_player_hand_strength = hand_strengths[current_player]
         
+        value_input = self.prepare_value_input(game_state, hand_strengths)
         policy_input = self.prepare_policy_input(game_state, current_player_hand_strength, public_strength)
 
         old_policy = self.policy_network(policy_input).detach().numpy()
@@ -259,7 +260,7 @@ class MCTS:
         avg_expected_values = np.dot(old_policy, expected_values)
 
         #  print avg_expected_values, old_policy, new_policy
-        np.set_printoptions(precision=2, suppress=True)
+        np.set_printoptions(precision=6, suppress=True)
 
         # print(f"expected_values:\n {expected_values}")
         print(f"current_expected_value:\n{current_player_expected_values}")
@@ -267,7 +268,7 @@ class MCTS:
         print(f"avg_expected_values:\n {avg_expected_value}")
         # print regrets 取到小數點第二位
         print(f"regrets:\n {regrets}")
-        #print(f"new_policy:\n {new_policy}")
+        print(f"new_policy:\n {new_policy}")
 
         # based on new policy, choose an action
         # first get valid actions, similar to act()
@@ -286,7 +287,10 @@ class MCTS:
         valid_probs = np.array(valid_probs)
         
         valid_probs += 0.1
+        valid_probs[-1] = 0 # decrease probability of all_in
         valid_probs /= valid_probs.sum()
+
+        print(f"valid_probs: {valid_probs}")
 
         action_index = np.random.choice(len(valid_probs), p=valid_probs)
         action, amount = valid_actions_expanded[action_index]
@@ -294,7 +298,7 @@ class MCTS:
         # action, amount = self.get_action_from_type(action_index, game_state)
         print(f"action: {action}, amount: {amount}")
 
-        return avg_expected_values, policy_input, new_policy, self.convert_action_type(action), amount
+        return avg_expected_values, policy_input, value_input, new_policy, self.convert_action_type(action), amount
     
     def get_action_index(self, action_space, action_type, amount, blind_amount, pot):
         # print(f"Debug: action_type = {action_type}, type = {type(action_type)}")

@@ -10,7 +10,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
 
-def train(num_episodes=10000, num_players=6, update_interval=100):
+def train(num_episodes=1, num_players=6, update_interval=1):
     policy_network = PolicyNetwork(num_players=num_players)
     value_function = ValueFunction(num_players=num_players, num_hand_categories=117)
     
@@ -47,14 +47,28 @@ def train(num_episodes=10000, num_players=6, update_interval=100):
             current_player = game_state['next_player']
             
             # 使用 MCTS 策略
-            avg_expected_values, policy_input, new_policy, action, amount = mcts.mcts_strategy(game_state)
+            avg_expected_values, policy_input, value_input, new_policy, action, amount = mcts.mcts_strategy(game_state)
             
             # 應用動作
             game_state, events = emulator.apply_action(game_state, action, amount)
             
+            # output game state: community cards, pot size, street, all players' stack
+            community_cards = game_state['table'].get_community_card()
+            print(f"\nCommunity cards: {[f'{card.rank}-{card.suit}' for card in community_cards]}")
+            
+            # Calculate the total pot size manually
+            total_pot = sum(player.paid_sum() for player in game_state['table'].seats.players)
+            print(f"Pot size: {total_pot}")
+            
+            print(f"Street: {game_state['street']}")
+            print("Players' stack:")
+            for player in game_state['table'].seats.players:
+                print(f"{player.name}: {player.stack}")
+
+
             # 收集訓練數據
             policy_data.append((policy_input, new_policy))
-            value_data.append((policy_input, avg_expected_values))
+            value_data.append((value_input, avg_expected_values))
         
         # 更新網絡
         if (episode + 1) % update_interval == 0:
@@ -72,7 +86,7 @@ def update_networks(policy_network, value_function, policy_optimizer, value_opti
     policy_loss = 0
     for inputs, target in policy_data:
         output = policy_network(inputs)
-        policy_loss += F.kl_div(output.log(), torch.tensor(target), reduction='batchmean')
+        policy_loss += F.kl_div(output.log(), torch.tensor(target, dtype=torch.float32), reduction='batchmean')
     policy_loss /= len(policy_data)
     policy_loss.backward()
     policy_optimizer.step()
@@ -81,7 +95,7 @@ def update_networks(policy_network, value_function, policy_optimizer, value_opti
     value_loss = 0
     for inputs, target in value_data:
         output = value_function(*inputs)
-        value_loss += F.mse_loss(output, torch.tensor(target))
+        value_loss += F.mse_loss(output, torch.tensor(target, dtype=torch.float32))
     value_loss /= len(value_data)
     value_loss.backward()
     value_optimizer.step()
