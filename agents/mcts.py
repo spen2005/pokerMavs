@@ -181,18 +181,26 @@ class MCTS:
         action_space = get_action_space(betting_stage)
         num_players = len(game_state['table'].seats.players)
 
-        expected_values = np.zeros((len(action_space), num_players))
+        expected_values = np.zeros(7)
 
         # calculate hand strengths for each player
         hand_strengths = self.calculate_hand_strengths(game_state)
         # calculate public strength
         public_strength = self.calculate_public_strength(game_state)
+        # get the current stack of each player
+        current_stacks = [player.stack for player in game_state['table'].seats.players]
+        # get the pot size
+        pot = self.get_total_pot(game_state)
 
         for i in range(num_samples):
             print(f"=== sample {i+1} ===")
             simulated_state = game_state.copy()
             street = simulated_state['street']
             # sample to the next street and evaluate the payoff using the value function
+            print(f"now street: {simulated_state['street']}")
+            first_action = self.act(simulated_state, hand_strengths, public_strength)
+            simulated_state, _ = self.emulator.apply_action(simulated_state, first_action['action'], first_action['amount'])
+            
             while street == simulated_state['street']:
                 # print now street
                 print(f"now street: {simulated_state['street']}")
@@ -201,6 +209,7 @@ class MCTS:
                 
             # 如果回合結束但遊戲沒有結束，進入下一個街道
             if not self.is_game_end(simulated_state):
+                # if game not ended, payoffs = the final stack - current stack + value function
                 print("game continued")
                 # print now street
                 print(f"now street: {simulated_state['street']}")
@@ -209,10 +218,13 @@ class MCTS:
                 value_input = self.prepare_value_input(simulated_state, hand_strengths)
                 payoffs = self.value_function.evaluate(*value_input)
             else:
+                # if game ended, payoffs = the final stack - current stack
                 print("game ended")
-                payoffs = self.calculate_payoff(simulated_state)
+                # get the final stack of each player
+                final_stacks = [player.stack for player in simulated_state['table'].seats.players]
+                payoffs = [final_stacks[i] - current_stacks[i] for i in range(len(current_stacks))]
 
-            action_index = action_space.index(action['action'])
+            action_index = self.get_action_index(action_space, first_action['action'], first_action['amount'], game_state['small_blind_amount']*2, pot)
             expected_values[action_index] += np.array(payoffs) / num_samples
 
         current_player = game_state['next_player']
@@ -237,6 +249,45 @@ class MCTS:
 
         return avg_expected_values, old_policy, new_policy
     
+    def get_action_index(self, action_space, action_type, amount, blind_amount, pot):
+        print(f"Debug: action_type = {action_type}, type = {type(action_type)}")
+        print(f"Debug: ActionType.CALL = {ActionType.CALL}, type = {type(ActionType.CALL)}")
+
+        # 使用字符串比较来确保兼容性
+        action_type_str = str(action_type).split('.')[-1] if hasattr(action_type, 'name') else str(action_type)
+
+        # if fold, return 0
+        if action_type_str == "fold":
+            return 0
+        # if call, return 1 (regardless of the amount)
+        elif action_type_str == "call":
+            return 1
+        # if raise 2.5bb or bet 0.33 pot, return 2
+        elif action_type_str == "raise" and amount == 2.5 * blind_amount:
+            return 2
+        elif action_type_str == "bet" and amount == 0.33 * pot:
+            return 2
+        # if raise 5bb or bet 0.66 pot, return 3
+        elif action_type_str == "raise" and amount == 5 * blind_amount:
+            return 3
+        elif action_type_str == "bet" and amount == 0.66 * pot:
+            return 3
+        # if raise 10bb or bet 1 pot, return 4
+        elif action_type_str == "raise" and amount == 10 * blind_amount:
+            return 4
+        elif action_type_str == "bet" and amount == 1 * pot:
+            return 4
+        # if raise 25bb or bet 2 pot, return 5
+        elif action_type_str == "raise" and amount == 25 * blind_amount:
+            return 5
+        elif action_type_str == "bet" and amount == 2 * pot:
+            return 5
+        # if all_in, return 6
+        elif action_type_str == "allin":
+            return 6
+        else:
+            raise ValueError(f"Invalid action: {action_type}, {amount}")
+
     def convert_to_pye_game_state(self, game_state):
         table = Table()
         
