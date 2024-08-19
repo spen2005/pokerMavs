@@ -2,8 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from environment.actions import ActionType, PREFLOP_ACTIONS, POSTFLOP_ACTIONS
-
 class PolicyNetwork(nn.Module):
     def __init__(self, num_players=6):
         super(PolicyNetwork, self).__init__()
@@ -16,8 +14,8 @@ class PolicyNetwork(nn.Module):
         other_inputs = 5 + 2 * num_players
         input_dim = hand_strength_dim + public_strength_dim + other_inputs
         
-        # Calculate action dimension
-        action_dim = len(ActionType) + len(PREFLOP_ACTIONS[ActionType.RAISE]) + len(POSTFLOP_ACTIONS[ActionType.BET]) - 2
+        # Set action dimension to 7
+        action_dim = 7
         
         # Input layer
         self.input_fc = nn.Linear(input_dim, 256)

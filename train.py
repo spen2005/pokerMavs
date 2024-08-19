@@ -40,18 +40,12 @@ def train(num_episodes=10000, num_players=6, update_interval=100):
             current_player = game_state['next_player']
             
             # 使用 MCTS 策略
-            avg_expected_values, old_policy, new_policy = mcts.mcts_strategy(game_state)
-            
-            # 根據新策略選擇動作
-            action_probs = new_policy
-            action_type = np.random.choice(len(action_probs), p=action_probs)
-            action = mcts.get_action_from_type(action_type, game_state)
+            avg_expected_values, policy_input, new_policy, action, amount = mcts.mcts_strategy(game_state)
             
             # 應用動作
-            game_state, events = emulator.apply_action(game_state, action['action'], action['amount'])
+            game_state, events = emulator.apply_action(game_state, action, amount)
             
             # 收集訓練數據
-            policy_input = mcts.prepare_policy_input(game_state)
             policy_data.append((policy_input, new_policy))
             value_data.append((policy_input, avg_expected_values))
         
