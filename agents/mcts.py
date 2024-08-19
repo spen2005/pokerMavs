@@ -152,7 +152,8 @@ class MCTS:
             raise ValueError(f"Invalid action: {action}")
         
     def mcts_strategy(self, game_state, num_samples=1000):
-        
+        # print player
+        print(f"player: {game_state['table'].seats.players[game_state['next_player']].name}")
         print("computing mcts strategy...")
         '''
         print("Game state structure:")
@@ -258,11 +259,13 @@ class MCTS:
         avg_expected_values = np.dot(old_policy, expected_values)
 
         #  print avg_expected_values, old_policy, new_policy
-        
-        #print(f"expected_values:\n {expected_values}")
-        #print(f"current_expected_value:\n{current_player_expected_values}")
-        #print(f"old_policy:\n {old_policy}")
-        #print(f"avg_expected_values:\n {avg_expected_value}")
+        np.set_printoptions(precision=2, suppress=True)
+
+        # print(f"expected_values:\n {expected_values}")
+        print(f"current_expected_value:\n{current_player_expected_values}")
+        print(f"old_policy:\n {old_policy}")
+        print(f"avg_expected_values:\n {avg_expected_value}")
+        # print regrets 取到小數點第二位
         print(f"regrets:\n {regrets}")
         #print(f"new_policy:\n {new_policy}")
 
@@ -513,9 +516,9 @@ class MCTS:
         pot = self.get_total_pot(game_state)  # Use the existing method to get the total pot
         round = game_state['round_count']
         # 將手牌強度轉換為適合 ValueFunction 的格式
-        hand_strengths_tensor = torch.tensor([hs.flatten() for hs in hand_strengths]).unsqueeze(0)
-        pot_tensor = torch.tensor([[pot]]).float()
-        # current round
+        hand_strengths_array = np.array([hs.flatten() for hs in hand_strengths])
+        hand_strengths_tensor = torch.tensor(hand_strengths_array, dtype=torch.float32).unsqueeze(0)
+        pot_tensor = torch.tensor([[pot]], dtype=torch.float32)
         round_tensor = torch.tensor([[round]], dtype=torch.float32)
         
         return hand_strengths_tensor, pot_tensor, round_tensor

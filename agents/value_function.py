@@ -33,7 +33,7 @@ class ValueFunction(nn.Module):
 
     def evaluate(self, hand_strengths, pot, round):
         with torch.no_grad():
-            hand_strengths = torch.tensor(hand_strengths, dtype=torch.float32)
+            hand_strengths = hand_strengths.clone().detach().float()
             pot = torch.tensor([[pot]], dtype=torch.float32)
             round = torch.tensor([[round]], dtype=torch.float32)
             expected_payoffs = self.forward(hand_strengths, pot, round)

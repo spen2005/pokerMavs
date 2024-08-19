@@ -25,6 +25,7 @@ def train(num_episodes=10000, num_players=6, update_interval=100):
     value_data = []
 
     for episode in range(num_episodes):
+        print(f"Episode {episode + 1}")
         players_info = {
             f"player_{i}": {"name": f"player_{i}", "stack": 1000}
             for i in range(num_players)
