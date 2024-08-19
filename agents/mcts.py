@@ -84,72 +84,8 @@ class MCTS:
         chosen_action_index = np.random.choice(len(valid_probs), p=valid_probs)
         chosen_action, chosen_amount = valid_actions_expanded[chosen_action_index]
 
-        #print(f"chosen action: {chosen_action}, amount: {chosen_amount}")
+        # print(f"chosen action: {chosen_action}, amount: {chosen_amount}")
         return {'action': self.convert_action_type(chosen_action), 'amount': chosen_amount}
-
-    def get_current_bet(self, game_state):
-        return max(player.paid_sum() for player in game_state['table'].seats.players)
-
-    def get_player_bet(self, game_state, player):
-        return player.paid_sum()
-
-    def get_min_raise(self, game_state):
-        current_bet = self.get_current_bet(game_state)
-        last_raise = game_state['small_blind_amount']  # 如果無法獲取上一次的 raise 金額，我們使用小盲作為最小 raise
-        return current_bet + max(last_raise, game_state['small_blind_amount'])
-
-    def get_valid_actions(self, game_state, action_space):
-        player = game_state['table'].seats.players[game_state['next_player']]
-        current_bet = self.get_current_bet(game_state)
-        player_bet = self.get_player_bet(game_state, player)
-        to_call = current_bet - player_bet
-        remaining_stack = player.stack
-
-        # 計算玩家在這條street之前的總投注
-        previous_streets_bet = player.paid_sum() - player_bet
-        '''
-        print(f"Player {player.name} previous streets bet: {previous_streets_bet}")
-        print(f"Player {player.name} current street bet: {player_bet}")
-        print(f"Player {player.name} remaining stack: {remaining_stack}")
-        print(f"Current bet to call: {to_call}")
-        '''
-        valid_actions = []
-
-        for action, values in action_space.items():
-            if action == ActionType.FOLD:
-                valid_actions.append((action, 0))
-            elif action == ActionType.CALL:
-                if remaining_stack >= to_call:
-                    valid_actions.append((action, to_call+player_bet))
-            elif action == ActionType.RAISE:
-                for raise_multiplier in values:
-                    raise_amount = raise_multiplier * game_state['small_blind_amount'] * 2
-                    if raise_amount > current_bet and raise_amount <= remaining_stack + player_bet:
-                        valid_actions.append((action, raise_amount))
-            elif action == ActionType.BET:
-                for bet_multiplier in values:
-                    bet_amount = int(bet_multiplier * self.get_total_pot(game_state))
-                    if bet_amount > current_bet and bet_amount <= remaining_stack + player_bet:
-                        valid_actions.append((action, bet_amount))
-            elif action == ActionType.ALL_IN:
-                if remaining_stack > 0:
-                    valid_actions.append((action, player.paid_sum()+remaining_stack))
-
-        #print(f"Valid actions for player {player.name}: {valid_actions}")
-        return valid_actions
-
-    def get_action_amount(self, action, game_state):
-        #print("getting action amount...")
-        if action in [ActionType.FOLD, ActionType.CALL]:
-            return 0
-        elif action == ActionType.RAISE:
-            return min(game_state['small_blind_amount'] * 2, game_state['table'].seats.players[game_state['next_player']].stack)
-        elif action == ActionType.ALL_IN:
-            return game_state['table'].seats.players[game_state['next_player']].stack
-        elif action == ActionType.BET:
-            return min(game_state['small_blind_amount'] * 2, game_state['table'].seats.players[game_state['next_player']].stack)
-        else:
-            raise ValueError(f"Invalid action: {action}")
         
     def mcts_strategy(self, game_state, num_samples=1000):
         # print player
@@ -288,6 +224,7 @@ class MCTS:
         
         valid_probs += 0.1
         valid_probs[-1] = 0 # decrease probability of all_in
+        valid_probs[0] = 0 # decrease probability of fold
         valid_probs /= valid_probs.sum()
 
         print(f"valid_probs: {valid_probs}")
@@ -301,7 +238,7 @@ class MCTS:
         return avg_expected_values, policy_input, value_input, new_policy, self.convert_action_type(action), amount
     
     def get_action_index(self, action_space, action_type, amount, blind_amount, pot):
-        # print(f"Debug: action_type = {action_type}, type = {type(action_type)}")
+        # print(f"Debug: amount = {amount}, action_type = {action_type}")
         # if it is <enum 'ActionType'> convert it to string
         
         # 使用字符串比较来确保兼容性
@@ -318,22 +255,22 @@ class MCTS:
         # if raise 2.5bb or bet 0.33 pot, return 2
         elif (action_type_str == "raise" or action_type_str == "RAISE") and amount == 2.5 * blind_amount:
             return 2
-        elif (action_type_str == "bet" or action_type_str == "BET") and amount == 0.33 * pot:
+        elif (action_type_str == "bet" or action_type_str == "BET") and abs(amount - 0.33 * pot) < 10:
             return 2
         # if raise 5bb or bet 0.66 pot, return 3
         elif (action_type_str == "raise" or action_type_str == "RAISE") and amount == 5 * blind_amount:
             return 3
-        elif (action_type_str == "bet" or action_type_str == "BET") and amount == 0.66 * pot:
+        elif (action_type_str == "bet" or action_type_str == "BET") and abs(amount - 0.66 * pot) < 10:
             return 3
         # if raise 10bb or bet 1 pot, return 4
         elif (action_type_str == "raise" or action_type_str == "RAISE") and amount == 10 * blind_amount:
             return 4
-        elif (action_type_str == "bet" or action_type_str == "BET") and amount == 1 * pot:
+        elif (action_type_str == "bet" or action_type_str == "BET") and abs(amount - pot) < 10:
             return 4
         # if raise 25bb or bet 2 pot, return 5
         elif (action_type_str == "raise" or action_type_str == "RAISE") and amount == 25 * blind_amount:
             return 5
-        elif (action_type_str == "bet" or action_type_str == "BET") and amount == 2 * pot:
+        elif (action_type_str == "bet" or action_type_str == "BET") and  abs(amount - 2 * pot) < 10:
             return 5
         # if raise more than 25bb, return 6
         elif (action_type_str == "raise" or action_type_str == "RAISE") and amount > 25 * blind_amount:
@@ -720,10 +657,11 @@ class MCTS:
         return max(self.get_player_bet(game_state, player) for player in game_state['table'].seats.players)
 
     def get_player_bet(self, game_state, player):
-        return game_state['table'].get_total_pot() - player.stack + player.initial_stack
+        return 1000 - player.stack
 
     def get_min_raise(self, game_state):
         current_bet = self.get_current_bet(game_state)
+        print(f"current_bet: {current_bet}")
         last_raise = game_state['small_blind_amount']  # 如果無法獲取上一次的 raise 金額，我們使用小盲作為最小 raise
         return current_bet + max(last_raise, game_state['small_blind_amount'])
 
@@ -740,8 +678,59 @@ class MCTS:
     def get_player_bet(self, game_state, player):
         return player.paid_sum()
 
-    def get_current_bet(self, game_state):
-        return max(player.paid_sum() for player in game_state['table'].seats.players)
-
     def get_total_pot(self, game_state):
-        return sum(player.paid_sum() for player in game_state['table'].seats.players)
+        return 6000 - (sum(player.stack for player in game_state['table'].seats.players))
+
+    def get_valid_actions(self, game_state, action_space):
+        player = game_state['table'].seats.players[game_state['next_player']]
+        current_bet = self.get_current_bet(game_state)
+        player_bet = self.get_player_bet(game_state, player)
+        to_call = current_bet - player_bet
+        remaining_stack = player.stack
+        # print(f"to_call: {to_call}")
+
+        # 計算玩家在這條street之前的總投注
+        previous_streets_bet = player.paid_sum() - player_bet
+        '''
+        print(f"Player {player.name} previous streets bet: {previous_streets_bet}")
+        print(f"Player {player.name} current street bet: {player_bet}")
+        print(f"Player {player.name} remaining stack: {remaining_stack}")
+        print(f"Current bet to call: {to_call}")
+        '''
+        valid_actions = []
+
+        for action, values in action_space.items():
+            if action == ActionType.FOLD:
+                valid_actions.append((action, 0))
+            elif action == ActionType.CALL:
+                if remaining_stack >= to_call:
+                    valid_actions.append((action, to_call+player_bet))
+            elif action == ActionType.RAISE:
+                for raise_multiplier in values:
+                    raise_amount = raise_multiplier * game_state['small_blind_amount'] * 2
+                    if raise_amount > current_bet and raise_amount <= remaining_stack + player_bet:
+                        valid_actions.append((action, raise_amount))
+            elif action == ActionType.BET:
+                for bet_multiplier in values:
+                    bet_amount = int(bet_multiplier * self.get_total_pot(game_state))
+                    if bet_amount > current_bet and bet_amount <= remaining_stack + player_bet:
+                        valid_actions.append((action, bet_amount))
+            elif action == ActionType.ALL_IN:
+                if remaining_stack > 0:
+                    valid_actions.append((action, player.paid_sum()+remaining_stack))
+
+        #print(f"Valid actions for player {player.name}: {valid_actions}")
+        return valid_actions
+
+    def get_action_amount(self, action, game_state):
+        #print("getting action amount...")
+        if action in [ActionType.FOLD, ActionType.CALL]:
+            return 0
+        elif action == ActionType.RAISE:
+            return min(game_state['small_blind_amount'] * 2, game_state['table'].seats.players[game_state['next_player']].stack)
+        elif action == ActionType.ALL_IN:
+            return game_state['table'].seats.players[game_state['next_player']].stack
+        elif action == ActionType.BET:
+            return min(game_state['small_blind_amount'] * 2, game_state['table'].seats.players[game_state['next_player']].stack)
+        else:
+            raise ValueError(f"Invalid action: {action}")

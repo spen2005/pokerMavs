@@ -57,7 +57,7 @@ def train(num_episodes=1, num_players=6, update_interval=1):
             print(f"\nCommunity cards: {[f'{card.rank}-{card.suit}' for card in community_cards]}")
             
             # Calculate the total pot size manually
-            total_pot = sum(player.paid_sum() for player in game_state['table'].seats.players)
+            total_pot = mcts.get_total_pot(game_state)
             print(f"Pot size: {total_pot}")
             
             print(f"Street: {game_state['street']}")
