@@ -41,7 +41,7 @@ class MCTS:
         # 設置 Emulator 的初始狀態
         self.initial_state = initial_state
 
-    def act(self, game_state, hand_strengths, public_strength):
+    def act(self, game_state, hand_strengths, public_strength, epsilon=0.1):
         '''
         print(f"Current street: {game_state['street']}")
         print(f"Current player: {game_state['next_player']}")
@@ -77,10 +77,8 @@ class MCTS:
 
         # 重新歸一化概率
         valid_probs = np.array(valid_probs)
-        if valid_probs.sum() > 0:
-            valid_probs /= valid_probs.sum()
-        else:
-            valid_probs = np.ones(len(valid_probs)) / len(valid_probs)  # 如果所有概率為0，則均分概率
+        valid_probs += epsilon # epsilon greedy
+        valid_probs /= valid_probs.sum()
 
         # 選擇動作
         chosen_action_index = np.random.choice(len(valid_probs), p=valid_probs)
@@ -154,8 +152,9 @@ class MCTS:
             raise ValueError(f"Invalid action: {action}")
         
     def mcts_strategy(self, game_state, num_samples=1000):
-        '''
+        
         print("computing mcts strategy...")
+        '''
         print("Game state structure:")
         
         for key, value in game_state.items():
@@ -186,6 +185,7 @@ class MCTS:
         num_players = len(game_state['table'].seats.players)
 
         expected_values = np.zeros((7, num_players))
+        action_count = np.zeros(7)
 
         # calculate hand strengths for each player
         hand_strengths = self.calculate_hand_strengths(game_state)
@@ -197,12 +197,12 @@ class MCTS:
         pot = self.get_total_pot(game_state)
 
         for i in range(num_samples):
-            print(f"=== sample {i+1} ===")
+            # print(f"=== sample {i+1} ===")
             simulated_state = game_state.copy()
             street = simulated_state['street']
             # sample to the next street and evaluate the payoff using the value function
             # print(f"now street: {simulated_state['street']}")
-            first_action = self.act(simulated_state, hand_strengths, public_strength)
+            first_action = self.act(simulated_state, hand_strengths, public_strength, 0.1)
             simulated_state, _ = self.emulator.apply_action(simulated_state, first_action['action'], first_action['amount'])
             
             while street == simulated_state['street']:
@@ -229,7 +229,12 @@ class MCTS:
                 payoffs = [final_stacks[i] - current_stacks[i] for i in range(len(current_stacks))]
 
             action_index = self.get_action_index(action_space, first_action['action'], first_action['amount'], game_state['small_blind_amount']*2, pot)
-            expected_values[action_index] += np.array(payoffs) / num_samples
+            expected_values[action_index] += np.array(payoffs)
+            action_count[action_index] += 1
+        
+        for index in range(7):
+            if action_count[index] > 0:
+                expected_values[index] /= action_count[index]
 
         current_player = game_state['next_player']
         current_player_hand_strength = hand_strengths[current_player]
@@ -253,16 +258,20 @@ class MCTS:
         avg_expected_values = np.dot(old_policy, expected_values)
 
         #  print avg_expected_values, old_policy, new_policy
-        print(f"avg_expected_values: {avg_expected_values}")
-        print(f"old_policy: {old_policy}")
-        print(f"new_policy: {new_policy}")
+        
+        #print(f"expected_values:\n {expected_values}")
+        #print(f"current_expected_value:\n{current_player_expected_values}")
+        #print(f"old_policy:\n {old_policy}")
+        #print(f"avg_expected_values:\n {avg_expected_value}")
+        print(f"regrets:\n {regrets}")
+        #print(f"new_policy:\n {new_policy}")
 
         # based on new policy, choose an action
         # first get valid actions, similar to act()
         valid_actions = self.get_valid_actions(game_state, action_space)
 
         # print valid_actions
-        print(f"valid_actions: {valid_actions}")
+        # print(f"valid_actions: {valid_actions}")
 
         valid_probs = []
         valid_actions_expanded = []
@@ -273,10 +282,8 @@ class MCTS:
         
         valid_probs = np.array(valid_probs)
         
-        if valid_probs.sum() > 0:
-            valid_probs /= valid_probs.sum()
-        else:
-            valid_probs = np.ones_like(valid_probs) / len(valid_probs)
+        valid_probs += 0.1
+        valid_probs /= valid_probs.sum()
 
         action_index = np.random.choice(len(valid_probs), p=valid_probs)
         action, amount = valid_actions_expanded[action_index]

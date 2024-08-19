@@ -36,6 +36,12 @@ def train(num_episodes=10000, num_players=6, update_interval=100):
         for player in game_state['table'].seats.players:
             game_state = attach_hole_card_from_deck(game_state, player.uuid)
         
+        # print the hand cards of each player
+        print("Players' hand cards:")
+        for player in game_state['table'].seats.players:
+            hand_cards = [f"{card.rank}-{card.suit}" for card in player.hole_card]
+            print(f"{player.name}: {hand_cards}")
+
         while game_state['street'] != Const.Street.FINISHED:
             current_player = game_state['next_player']
             
