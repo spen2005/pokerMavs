@@ -11,6 +11,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
 import os
+from torch.utils.tensorboard import SummaryWriter
 
 # Create the "trained" folder if it doesn't exist
 os.makedirs("trained", exist_ok=True)
@@ -39,6 +40,9 @@ def train(num_episodes=100000, num_players=6, update_interval=5):
 
     policy_data = []
     value_data = []
+
+    # Initialize TensorBoard writer
+    writer = SummaryWriter(log_dir="runs/poker_training")
 
     for episode in range(num_episodes):
         print(f"Episode {episode + 1}")
@@ -72,7 +76,7 @@ def train(num_episodes=100000, num_players=6, update_interval=5):
             previous_state = game_state
 
             # 使用 MCTS 策略
-            avg_expected_values, policy_input, value_input, new_policy, action, amount = mcts.mcts_strategy(game_state, each_player_pay_before_this_street)
+            avg_expected_values, policy_input, value_input, new_policy, action, amount = mcts.mcts_strategy(game_state, each_player_pay_before_this_street, episode)
 
             # 應用動作
             print(f"convert_action_type: {mcts.convert_action_type(action)}")
@@ -83,7 +87,7 @@ def train(num_episodes=100000, num_players=6, update_interval=5):
             print(f"\nCommunity cards: {[f'{card.rank}-{card.suit}' for card in community_cards]}")
             
             # Calculate the total pot size manually
-            total_pot = sum(player.paid_sum() for player in game_state['table'].seats.players)
+            total_pot = mcts.get_total_pot(game_state)
             print(f"Pot size: {total_pot}")
             
             print(f"Street: {game_state['street']}")
@@ -98,9 +102,13 @@ def train(num_episodes=100000, num_players=6, update_interval=5):
         
         # 更新網絡
         if (episode + 1) % update_interval == 0:
-            update_networks(policy_network, value_function, policy_optimizer, value_optimizer, policy_data, value_data, epochs=10)
+            policy_loss, value_loss = update_networks(policy_network, value_function, policy_optimizer, value_optimizer, policy_data, value_data, epochs=25)
             policy_data = []
             value_data = []
+
+            # Log losses to TensorBoard
+            writer.add_scalar('Loss/Policy', policy_loss, episode + 1)
+            writer.add_scalar('Loss/Value', value_loss, episode + 1)
 
         if (episode + 1) % 1000 == 0:
             print(f"\nCompleted {episode + 1} episodes")
@@ -110,6 +118,7 @@ def train(num_episodes=100000, num_players=6, update_interval=5):
     save_model(value_function, "trained/trained_value_function.pth")
 
     print("\nTraining completed")
+    writer.close()
 
 def update_networks(policy_network, value_function, policy_optimizer, value_optimizer, policy_data, value_data, epochs=25):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -138,6 +147,8 @@ def update_networks(policy_network, value_function, policy_optimizer, value_opti
         value_optimizer.step()
 
         print(f"Epoch {epoch + 1}/{epochs} - Policy Loss: {policy_loss.item()}, Value Loss: {value_loss.item()}")
+
+    return policy_loss.item(), value_loss.item()
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

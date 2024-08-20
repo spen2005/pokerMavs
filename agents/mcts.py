@@ -93,7 +93,7 @@ class MCTS:
         # print(f"chosen action: {chosen_action}, amount: {chosen_amount}")
         return {'action': chosen_action, 'amount': chosen_amount}
         
-    def mcts_strategy(self, game_state, each_player_pay_before_this_street, num_samples=1000):
+    def mcts_strategy(self, game_state, each_player_pay_before_this_street, episodes, num_samples=1000):
         # print player
         print(f"player: {game_state['table'].seats.players[game_state['next_player']].name}")
         print("computing mcts strategy...")
@@ -233,10 +233,14 @@ class MCTS:
         
         valid_probs = np.array(valid_probs)
         
-        valid_probs += 1
-        valid_probs[-1] = 0.05 # decrease probability of all_in
-        valid_probs[0] = 0.5 # decrease probability of fold
-        valid_probs /= valid_probs.sum()
+        if(episodes<100):
+            valid_probs += 1
+            valid_probs[-1] = 0.01 + 0.05 * game_state['street'] # decrease probability of all_in
+            valid_probs[0] = 0.05 # decrease probability of fold
+            valid_probs /= valid_probs.sum()
+        else:
+            valid_probs += 0.1
+            valid_probs /= valid_probs.sum()
 
         print(f"valid_probs: {valid_probs}")
 
@@ -706,12 +710,12 @@ class MCTS:
             elif action == ActionType.RAISE:
                 for raise_multiplier in values:
                     raise_amount = raise_multiplier * game_state['small_blind_amount'] * 2
-                    if raise_amount+before_bet >= current_bet and raise_amount - this_bet < remaining_stack:
+                    if raise_amount+before_bet >= current_bet*1.5 and raise_amount - this_bet < remaining_stack:
                         valid_actions.append((action, raise_amount))
             elif action == ActionType.BET:
                 for bet_multiplier in values:
                     bet_amount = int(bet_multiplier * self.get_total_pot(game_state))
-                    if bet_amount + before_bet >= current_bet and bet_amount - this_bet < remaining_stack:
+                    if bet_amount + before_bet >= current_bet*1.5 and bet_amount - this_bet < remaining_stack:
                         valid_actions.append((action, bet_amount))
             elif action == ActionType.ALL_IN:
                 if remaining_stack > 0:
