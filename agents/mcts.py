@@ -19,8 +19,9 @@ from environment.actions import ActionType, BettingStage, PREFLOP_ACTIONS, POSTF
 
 class MCTS:
     def __init__(self, policy_network, value_function, num_players=6, max_round=1, initial_stack=1000, small_blind_amount=5, ante_amount=0):
-        self.policy_network = policy_network
-        self.value_function = value_function
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.policy_network = policy_network.to(self.device)
+        self.value_function = value_function.to(self.device)
         self.num_players = num_players
         self.phe = PokerHandEvaluator()
         
@@ -62,7 +63,9 @@ class MCTS:
         
         # 獲取策略網絡的輸出
         policy_input = self.prepare_policy_input(game_state, current_player_hand_strengths, public_strength)
-        action_probs = self.policy_network(policy_input).detach().numpy().squeeze()
+        policy_input = policy_input.to(self.device)  # Move policy_input to the same device as policy_network
+        with torch.no_grad():
+            action_probs = self.policy_network(policy_input).cpu().numpy().squeeze()
 
         # 獲取有效動作
         valid_actions = self.get_valid_actions(game_state, action_space, each_player_pay_before_this_street)
@@ -131,6 +134,9 @@ class MCTS:
         hand_strengths = self.calculate_hand_strengths(game_state)
         # calculate public strength
         public_strength = self.calculate_public_strength(game_state)
+        # If hand_strengths is a list of NumPy arrays, convert it to a single NumPy array
+        if isinstance(hand_strengths, list) and isinstance(hand_strengths[0], np.ndarray):
+            hand_strengths = np.array(hand_strengths)
         # get the current stack of each player
         current_stacks = [player.stack for player in game_state['table'].seats.players]
         # get the pot size
@@ -182,8 +188,9 @@ class MCTS:
         
         value_input = self.prepare_value_input(game_state, hand_strengths)
         policy_input = self.prepare_policy_input(game_state, current_player_hand_strength, public_strength)
+        policy_input = policy_input.to(self.device)  # Ensure input is on the same device as policy_network
 
-        old_policy = self.policy_network(policy_input).detach().numpy()
+        old_policy = self.policy_network(policy_input).detach().cpu().numpy()
 
         current_player_expected_values = expected_values[:, current_player]
         avg_expected_value = np.dot(old_policy, current_player_expected_values)
@@ -331,7 +338,7 @@ class MCTS:
         table.dealer_btn = game_state.get('dealer_btn', 0)
         table.set_blind_pos(game_state.get('sb_pos', 0), game_state.get('bb_pos', 1))
         
-        # 設置玩家
+        # 置玩家
         for seat in game_state['seats']:
             player = Player(seat['uuid'], seat['stack'], seat['name'])
             player.hole_card = [Card.from_str(c) for c in seat.get('hole_card', [])]
@@ -437,41 +444,41 @@ class MCTS:
         return False
 
     def prepare_policy_input(self, game_state, current_player_hand_strength, public_strength):
-        # ("preparing policy input...")
-        # 準備其他輸入
-        round_num = game_state['round_count']
-        my_position = game_state['next_player']
-        active_players = sum(1 for player in game_state['table'].seats.players if player.is_active())
-        player_status = [1 if player.is_active() else 0 for player in game_state['table'].seats.players]
-        player_bets = [player.stack for player in game_state['table'].seats.players]
-        min_bet = game_state['small_blind_amount']
-        max_bet = max(player.stack for player in game_state['table'].seats.players)
-
-        # 將所有輸入組合成一個張量
         policy_input = torch.cat([
             torch.tensor(current_player_hand_strength.flatten(), dtype=torch.float32),
             torch.tensor(public_strength.flatten(), dtype=torch.float32),
-            torch.tensor([round_num, my_position, active_players, min_bet, max_bet], dtype=torch.float32),
-            torch.tensor(player_status, dtype=torch.float32),
-            torch.tensor(player_bets, dtype=torch.float32)
+            torch.tensor([
+                game_state['round_count'],
+                game_state['next_player'],
+                sum(1 for player in game_state['table'].seats.players if player.is_active()),
+                game_state['small_blind_amount'],
+                max(player.stack for player in game_state['table'].seats.players)
+            ], dtype=torch.float32),
+            torch.tensor([1 if player.is_active() else 0 for player in game_state['table'].seats.players], 
+                         dtype=torch.float32),
+            torch.tensor([player.stack for player in game_state['table'].seats.players], 
+                         dtype=torch.float32)
         ])
-
-        return policy_input.unsqueeze(0)  # 添加批次維度
+        
+        return policy_input.unsqueeze(0).to(self.device)  # Add batch dimension and move to the correct device
     
     def prepare_value_input(self, game_state, hand_strengths):
-        # print("preparing value input...")
-        pot = self.get_total_pot(game_state)  # Use the existing method to get the total pot
+        # Convert NumPy arrays to PyTorch tensors if necessary
+        if isinstance(hand_strengths, np.ndarray):
+            hand_strengths_tensor = torch.from_numpy(hand_strengths).float().to(self.device)
+        else:
+            hand_strengths_tensor = hand_strengths.to(self.device)
+        
+        pot = self.get_total_pot(game_state)
         round = game_state['round_count']
-        # 將手牌強度轉換為適合 ValueFunction 的格式
-        hand_strengths_array = np.array([hs.flatten() for hs in hand_strengths])
-        hand_strengths_tensor = torch.tensor(hand_strengths_array, dtype=torch.float32).unsqueeze(0)
-        pot_tensor = torch.tensor([[pot]], dtype=torch.float32)
-        round_tensor = torch.tensor([[round]], dtype=torch.float32)
+        
+        hand_strengths_tensor = hand_strengths_tensor.unsqueeze(0)
+        pot_tensor = torch.tensor([[pot]], dtype=torch.float32).to(self.device)
+        round_tensor = torch.tensor([[round]], dtype=torch.float32).to(self.device)
         
         return hand_strengths_tensor, pot_tensor, round_tensor
 
     def calculate_hand_strengths(self, game_state):
-        # print("calculating hand strengths...")
         hand_strengths = []
         for player in game_state['table'].seats.players:
             if hasattr(player, 'mcts_hole_card'):
@@ -483,11 +490,9 @@ class MCTS:
                 strength_matrix = np.zeros((13, 9))  # 假設一個空的強度矩陣
             hand_strengths.append(strength_matrix)
         
-        # print(f"Hand strengths calculated for {len(hand_strengths)} players")
         return hand_strengths
 
     def calculate_public_strength(self, game_state):
-        # print("calculating public strength...")
         community_cards = game_state.get('mcts_community_card', [])
         return self.phe.monte_carlo_simulation(community_cards)
 
@@ -497,7 +502,6 @@ class MCTS:
         
         converted_cards = []
         for card in cards:
-            # print(f"Original card: {card}")  # 調試輸出
             if isinstance(card, Card):
                 rank = card.rank
                 suit = card.suit
@@ -525,7 +529,6 @@ class MCTS:
             converted_card = f"{new_rank}{new_suit}"
             converted_cards.append(converted_card)
         
-        # print("All converted cards:", converted_cards)  # 調試輸出
         return converted_cards
 
     def convert_game_state_cards(self, game_state):
@@ -692,33 +695,6 @@ class MCTS:
         this_bet = self.get_player_bet(game_state, player) - before_bet
         to_call = current_bet - before_bet - this_bet
         remaining_stack = player.stack
-        '''
-        pokerengine api
-        def __min_raise_amount(self, players, sb_amount):
-            raise_histories = self.__raise_histories(players)
-            min_add_amount = sb_amount*2
-            max_amount = 0
-            for h in raise_histories:
-                min_add_amount = max(min_add_amount, h['add_amount'])
-                max_amount = max(max_amount, h['amount'])
-        return max_amount + min_add_amount
-        '''
-        
-        '''
-        print(f"current_bet: {current_bet}")
-        print(f"before_bet: {before_bet}")
-        print(f"this_bet: {this_bet}")
-        print(f"to_call: {to_call}")
-        print(f"remaining_stack: {remaining_stack}")
-        '''
-        # print(f"to_call: {to_call}")
-
-        '''
-        print(f"Player {player.name} previous streets bet: {previous_streets_bet}")
-        print(f"Player {player.name} current street bet: {player_bet}")
-        print(f"Player {player.name} remaining stack: {remaining_stack}")
-        print(f"Current bet to call: {to_call}")
-        '''
         valid_actions = []
 
         for action, values in action_space.items():
@@ -741,11 +717,9 @@ class MCTS:
                 if remaining_stack > 0:
                     valid_actions.append((action, this_bet+remaining_stack))
 
-        #print(f"Valid actions for player {player.name}: {valid_actions}")
         return valid_actions
 
     def get_action_amount(self, action, game_state):
-        #print("getting action amount...")
         if action in [ActionType.FOLD, ActionType.CALL]:
             return 0
         elif action == ActionType.RAISE:

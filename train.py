@@ -25,9 +25,10 @@ def load_model(model, path):
 def save_model(model, path):
     torch.save(model.state_dict(), path)
 
-def train(num_episodes=1, num_players=6, update_interval=1):
-    policy_network = PolicyNetwork(num_players=num_players)
-    value_function = ValueFunction(num_players=num_players, num_hand_categories=117)
+def train(num_episodes=100000, num_players=6, update_interval=5):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    policy_network = PolicyNetwork(num_players=num_players).to(device)
+    value_function = ValueFunction(num_players=num_players, num_hand_categories=117).to(device)
     
     policy_optimizer = optim.Adam(policy_network.parameters())
     value_optimizer = optim.Adam(value_function.parameters())
@@ -110,7 +111,7 @@ def train(num_episodes=1, num_players=6, update_interval=1):
 
     print("\nTraining completed")
 
-def update_networks(policy_network, value_function, policy_optimizer, value_optimizer, policy_data, value_data, epochs=10):
+def update_networks(policy_network, value_function, policy_optimizer, value_optimizer, policy_data, value_data, epochs=25):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     policy_network.to(device)
     value_function.to(device)

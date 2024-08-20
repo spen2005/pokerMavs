@@ -15,11 +15,15 @@ class ValueFunction(nn.Module):
         self.fc1 = nn.Linear(input_dim, 128)
         self.fc2 = nn.Linear(128, 64)
         self.fc3 = nn.Linear(64, num_players)  # 输出每个玩家的期望收益
+        
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.to(self.device)
     
     def forward(self, hand_strengths, pot, round):
-        # hand_strengths: [batch_size, num_players, num_hand_categories]
-        # pot: [batch_size, 1]
-        # round: [batch_size, 1]
+        # Ensure all inputs are on the same device
+        hand_strengths = hand_strengths.to(self.device)
+        pot = pot.to(self.device)
+        round = round.to(self.device)
         
         batch_size = hand_strengths.size(0)
         x = hand_strengths.view(batch_size, -1)  # 展平手牌强度矩阵
@@ -33,11 +37,11 @@ class ValueFunction(nn.Module):
 
     def evaluate(self, hand_strengths, pot, round):
         with torch.no_grad():
-            hand_strengths = hand_strengths.clone().detach().float()
-            pot = torch.tensor([[pot]], dtype=torch.float32)
-            round = torch.tensor([[round]], dtype=torch.float32)
+            hand_strengths = hand_strengths.to(self.device)
+            pot = pot.to(self.device)
+            round = round.to(self.device)
             expected_payoffs = self.forward(hand_strengths, pot, round)
-        return expected_payoffs.squeeze().tolist()
+        return expected_payoffs.cpu().squeeze().tolist()
 
 # 使用示例
 # evaluator = PokerHandEvaluator()
