@@ -41,7 +41,7 @@ class MCTS:
         # 設置 Emulator 的初始狀態
         self.initial_state = initial_state
 
-    def act(self, game_state, hand_strengths, public_strength, epsilon=0.1):
+    def act(self, game_state, hand_strengths, public_strength, each_player_pay_before_this_street, epsilon=0.1):    
         '''
         print(f"Current street: {game_state['street']}")
         print(f"Current player: {game_state['next_player']}")
@@ -65,8 +65,9 @@ class MCTS:
         action_probs = self.policy_network(policy_input).detach().numpy().squeeze()
 
         # 獲取有效動作
-        valid_actions = self.get_valid_actions(game_state, action_space)
+        valid_actions = self.get_valid_actions(game_state, action_space, each_player_pay_before_this_street)
 
+        # print(f"valid_actions: {valid_actions}")
         # 過濾無效動作的概率
         valid_probs = []
         valid_actions_expanded = []
@@ -84,14 +85,10 @@ class MCTS:
         chosen_action_index = np.random.choice(len(valid_probs), p=valid_probs)
         chosen_action, chosen_amount = valid_actions_expanded[chosen_action_index]
 
-        # if the action type is bet, we need to convert it to raise since the pokerengine only recognize raise
-        if chosen_action == ActionType.BET:
-            chosen_action = ActionType.RAISE
-
         # chosen_amount should add current player paid sum, since the definition of pokerengine is not same as ours
         # print(current_player)
         # print(f"chosen action: {chosen_action}, amount: {chosen_amount}")
-        return {'action': self.convert_action_type(chosen_action), 'amount': chosen_amount}
+        return {'action': chosen_action, 'amount': chosen_amount}
         
     def mcts_strategy(self, game_state, each_player_pay_before_this_street, num_samples=1000):
         # print player
@@ -145,14 +142,15 @@ class MCTS:
             street = simulated_state['street']
             # sample to the next street and evaluate the payoff using the value function
             # print(f"now street: {simulated_state['street']}")
-            first_action = self.act(simulated_state, hand_strengths, public_strength, 0.1)
-            simulated_state, _ = self.emulator.apply_action(simulated_state, first_action['action'], first_action['amount'])
+            first_action = self.act(simulated_state, hand_strengths, public_strength, each_player_pay_before_this_street, 0.1)
+
+            simulated_state, _ = self.emulator.apply_action(simulated_state, self.convert_action_type(first_action['action']), first_action['amount'])
             
             while street == simulated_state['street']:
                 # print now street
                 # print(f"now street: {simulated_state['street']}")
-                action = self.act(simulated_state, hand_strengths, public_strength)
-                simulated_state, _ = self.emulator.apply_action(simulated_state, action['action'], action['amount']+each_player_pay_before_this_street[simulated_state['next_player']])
+                action = self.act(simulated_state, hand_strengths, public_strength, each_player_pay_before_this_street, 0.1)
+                simulated_state, _ = self.emulator.apply_action(simulated_state, self.convert_action_type(action['action']), action['amount'])
                 
             # 如果回合結束但遊戲沒有結束，進入下一個街道
             if not self.is_game_end(simulated_state):
@@ -214,7 +212,7 @@ class MCTS:
 
         # based on new policy, choose an action
         # first get valid actions, similar to act()
-        valid_actions = self.get_valid_actions(game_state, action_space)
+        valid_actions = self.get_valid_actions(game_state, action_space, each_player_pay_before_this_street)
 
         # print valid_actions
         # print(f"valid_actions: {valid_actions}")
@@ -229,24 +227,21 @@ class MCTS:
         valid_probs = np.array(valid_probs)
         
         valid_probs += 1
-        valid_probs[-1] = 0.1 # decrease probability of all_in
-        valid_probs[0] -= 0.5 # decrease probability of fold
+        valid_probs[-1] = 0.05 # decrease probability of all_in
+        valid_probs[0] = 0.5 # decrease probability of fold
         valid_probs /= valid_probs.sum()
 
         print(f"valid_probs: {valid_probs}")
 
         action_index = np.random.choice(len(valid_probs), p=valid_probs)
         action, amount = valid_actions_expanded[action_index]
-        # if action is bet, convert it to raise, since the pokerengine only recognize raise
-        if action == ActionType.BET:
-            action = ActionType.RAISE
 
         # action, amount = self.get_action_from_type(action_index, game_state)
         print(f"action: {action}, amount: {amount}")
 
         print(current_player)
 
-        return avg_expected_values, policy_input, value_input, new_policy, self.convert_action_type(action), amount
+        return avg_expected_values, policy_input, value_input, new_policy, action, amount
     
     def get_action_index(self, action_space, action_type, amount, blind_amount, pot):
         # print(f"Debug: amount = {amount}, action_type = {action_type}")
@@ -281,7 +276,7 @@ class MCTS:
         # if raise 25bb or bet 2 pot, return 5
         elif (action_type_str == "raise" or action_type_str == "RAISE") and amount == 25 * blind_amount:
             return 5
-        elif (action_type_str == "bet" or action_type_str == "BET") and  abs(amount - 2 * pot) < 10:
+        elif (action_type_str == "bet" or action_type_str == "BET") and  abs(amount - 1.5 * pot) < 10:
             return 5
         # if raise more than 25bb, return 6
         elif (action_type_str == "raise" or action_type_str == "RAISE") and amount > 25 * blind_amount:
@@ -303,26 +298,26 @@ class MCTS:
         elif action_index == 2 and game_state['street'] == Const.Street.PREFLOP:
             return {'action': ActionType.RAISE, 'amount': 2.5 * game_state['small_blind_amount'] * 2}
         # if index is 2 and game_state['street'] == Const.Street.POSTFLOP, return bet 0.33 pot
-        elif action_index == 2 and game_state['street'] == Const.Street.POSTFLOP:
+        elif action_index == 2 and game_state['street'] != Const.Street.PREFLOP:
             return {'action': ActionType.BET, 'amount': 0.33 * game_state['pot']}
         # if index is 3 and game_state['street'] == Const.Street.PREFLOP, return raise 5bb
         elif action_index == 3 and game_state['street'] == Const.Street.PREFLOP:
             return {'action': ActionType.RAISE, 'amount': 5 * game_state['small_blind_amount'] * 2}
         # if index is 3 and game_state['street'] == Const.Street.POSTFLOP, return bet 0.66 pot
-        elif action_index == 3 and game_state['street'] == Const.Street.POSTFLOP:
+        elif action_index == 3 and game_state['street'] != Const.Street.PREFLOP:
             return {'action': ActionType.BET, 'amount': 0.66 * game_state['pot']}
         # if index is 4 and game_state['street'] == Const.Street.PREFLOP, return raise 10bb
         elif action_index == 4 and game_state['street'] == Const.Street.PREFLOP:
             return {'action': ActionType.RAISE, 'amount': 10 * game_state['small_blind_amount'] * 2}
         # if index is 4 and game_state['street'] == Const.Street.POSTFLOP, return bet 1 pot
-        elif action_index == 4 and game_state['street'] == Const.Street.POSTFLOP:
+        elif action_index == 4 and game_state['street'] != Const.Street.PREFLOP:
             return {'action': ActionType.BET, 'amount': 1 * game_state['pot']}
         # if index is 5 and game_state['street'] == Const.Street.PREFLOP, return raise 25bb
         elif action_index == 5 and game_state['street'] == Const.Street.PREFLOP:
             return {'action': ActionType.RAISE, 'amount': 25 * game_state['small_blind_amount'] * 2}
         # if index is 5 and game_state['street'] == Const.Street.POSTFLOP, return bet 2 pot
-        elif action_index == 5 and game_state['street'] == Const.Street.POSTFLOP:
-            return {'action': ActionType.BET, 'amount': 2 * game_state['pot']}
+        elif action_index == 5 and game_state['street'] != Const.Street.PREFLOP:
+            return {'action': ActionType.BET, 'amount': 1.5 * game_state['pot']}
         elif action_index == 6:
             return {'action': ActionType.ALL_IN, 'amount': game_state['table'].seats.players[game_state['next_player']].stack}
         else:
@@ -686,22 +681,38 @@ class MCTS:
             game_state['street'] = Const.Street.SHOWDOWN
         return game_state
     
-    def get_player_bet(self, game_state, player):
-        return player.paid_sum()
 
     def get_total_pot(self, game_state):
         return 6000 - (sum(player.stack for player in game_state['table'].seats.players))
 
-    def get_valid_actions(self, game_state, action_space):
+    def get_valid_actions(self, game_state, action_space, each_player_pay_before_this_street):
         player = game_state['table'].seats.players[game_state['next_player']]
         current_bet = self.get_current_bet(game_state)
-        player_bet = self.get_player_bet(game_state, player)
-        to_call = current_bet - player_bet
+        before_bet = each_player_pay_before_this_street[game_state['next_player']]
+        this_bet = self.get_player_bet(game_state, player) - before_bet
+        to_call = current_bet - before_bet - this_bet
         remaining_stack = player.stack
+        '''
+        pokerengine api
+        def __min_raise_amount(self, players, sb_amount):
+            raise_histories = self.__raise_histories(players)
+            min_add_amount = sb_amount*2
+            max_amount = 0
+            for h in raise_histories:
+                min_add_amount = max(min_add_amount, h['add_amount'])
+                max_amount = max(max_amount, h['amount'])
+        return max_amount + min_add_amount
+        '''
+        
+        '''
+        print(f"current_bet: {current_bet}")
+        print(f"before_bet: {before_bet}")
+        print(f"this_bet: {this_bet}")
+        print(f"to_call: {to_call}")
+        print(f"remaining_stack: {remaining_stack}")
+        '''
         # print(f"to_call: {to_call}")
 
-        # 計算玩家在這條street之前的總投注
-        previous_streets_bet = player.paid_sum() - player_bet
         '''
         print(f"Player {player.name} previous streets bet: {previous_streets_bet}")
         print(f"Player {player.name} current street bet: {player_bet}")
@@ -715,20 +726,20 @@ class MCTS:
                 valid_actions.append((action, 0))
             elif action == ActionType.CALL:
                 if remaining_stack >= to_call:
-                    valid_actions.append((action, to_call+player_bet))
+                    valid_actions.append((action, to_call+this_bet))
             elif action == ActionType.RAISE:
                 for raise_multiplier in values:
                     raise_amount = raise_multiplier * game_state['small_blind_amount'] * 2
-                    if raise_amount > current_bet and raise_amount <= remaining_stack + player_bet:
+                    if raise_amount+before_bet >= current_bet and raise_amount - this_bet < remaining_stack:
                         valid_actions.append((action, raise_amount))
             elif action == ActionType.BET:
                 for bet_multiplier in values:
                     bet_amount = int(bet_multiplier * self.get_total_pot(game_state))
-                    if bet_amount > current_bet and bet_amount <= remaining_stack + player_bet:
+                    if bet_amount + before_bet >= current_bet and bet_amount - this_bet < remaining_stack:
                         valid_actions.append((action, bet_amount))
             elif action == ActionType.ALL_IN:
                 if remaining_stack > 0:
-                    valid_actions.append((action, player.paid_sum()+remaining_stack))
+                    valid_actions.append((action, this_bet+remaining_stack))
 
         #print(f"Valid actions for player {player.name}: {valid_actions}")
         return valid_actions
