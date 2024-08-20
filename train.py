@@ -43,14 +43,21 @@ def train(num_episodes=1, num_players=6, update_interval=1):
             hand_cards = [f"{card.rank}-{card.suit}" for card in player.hole_card]
             print(f"{player.name}: {hand_cards}")
 
+        previous_state = game_state
+        each_player_pay_before_this_street = [0 for _ in range(num_players)]
+
         while game_state['street'] != Const.Street.FINISHED:
             current_player = game_state['next_player']
-            
+
+            if(game_state['street'] != previous_state['street']):
+                each_player_pay_before_this_street = [1000-player.stack for player in game_state['table'].seats.players]
+            previous_state = game_state
+
             # 使用 MCTS 策略
-            avg_expected_values, policy_input, value_input, new_policy, action, amount = mcts.mcts_strategy(game_state)
+            avg_expected_values, policy_input, value_input, new_policy, action, amount = mcts.mcts_strategy(game_state, each_player_pay_before_this_street)
             
             # 應用動作
-            game_state, events = emulator.apply_action(game_state, action, amount)
+            game_state, events = emulator.apply_action(game_state, action, amount+each_player_pay_before_this_street[current_player])
             
             # output game state: community cards, pot size, street, all players' stack
             community_cards = game_state['table'].get_community_card()
@@ -81,26 +88,29 @@ def train(num_episodes=1, num_players=6, update_interval=1):
 
     print("\nTraining completed")
 
-def update_networks(policy_network, value_function, policy_optimizer, value_optimizer, policy_data, value_data):
-    policy_optimizer.zero_grad()
-    policy_loss = 0
-    for inputs, target in policy_data:
-        output = policy_network(inputs)
-        policy_loss += F.kl_div(output.log(), torch.tensor(target, dtype=torch.float32), reduction='batchmean')
-    policy_loss /= len(policy_data)
-    policy_loss.backward()
-    policy_optimizer.step()
+def update_networks(policy_network, value_function, policy_optimizer, value_optimizer, policy_data, value_data, epochs=10):
+    for epoch in range(epochs):
+        policy_optimizer.zero_grad()
+        policy_loss = 0
+        for inputs, target in policy_data:
+            output = policy_network(inputs)
+            policy_loss += F.kl_div(output.log(), torch.tensor(target, dtype=torch.float32), reduction='batchmean')
+        policy_loss /= len(policy_data)
+        policy_loss.backward()
+        policy_optimizer.step()
 
-    value_optimizer.zero_grad()
-    value_loss = 0
-    for inputs, target in value_data:
-        output = value_function(*inputs)
-        value_loss += F.mse_loss(output, torch.tensor(target, dtype=torch.float32))
-    value_loss /= len(value_data)
-    value_loss.backward()
-    value_optimizer.step()
+        value_optimizer.zero_grad()
+        value_loss = 0
+        for inputs, target in value_data:
+            output = value_function(*inputs)
+            value_loss += F.mse_loss(output, torch.tensor(target, dtype=torch.float32))
+        value_loss /= len(value_data)
+        value_loss.backward()
+        value_optimizer.step()
 
-    print(f"Policy Loss: {policy_loss.item()}, Value Loss: {value_loss.item()}")
+        print(f"Epoch {epoch + 1}/{epochs} - Policy Loss: {policy_loss.item()}, Value Loss: {value_loss.item()}")
 
 if __name__ == "__main__":
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
     train()

@@ -84,10 +84,16 @@ class MCTS:
         chosen_action_index = np.random.choice(len(valid_probs), p=valid_probs)
         chosen_action, chosen_amount = valid_actions_expanded[chosen_action_index]
 
+        # if the action type is bet, we need to convert it to raise since the pokerengine only recognize raise
+        if chosen_action == ActionType.BET:
+            chosen_action = ActionType.RAISE
+
+        # chosen_amount should add current player paid sum, since the definition of pokerengine is not same as ours
+        # print(current_player)
         # print(f"chosen action: {chosen_action}, amount: {chosen_amount}")
         return {'action': self.convert_action_type(chosen_action), 'amount': chosen_amount}
         
-    def mcts_strategy(self, game_state, num_samples=1000):
+    def mcts_strategy(self, game_state, each_player_pay_before_this_street, num_samples=1000):
         # print player
         print(f"player: {game_state['table'].seats.players[game_state['next_player']].name}")
         print("computing mcts strategy...")
@@ -146,7 +152,7 @@ class MCTS:
                 # print now street
                 # print(f"now street: {simulated_state['street']}")
                 action = self.act(simulated_state, hand_strengths, public_strength)
-                simulated_state, _ = self.emulator.apply_action(simulated_state, action['action'], action['amount'])
+                simulated_state, _ = self.emulator.apply_action(simulated_state, action['action'], action['amount']+each_player_pay_before_this_street[simulated_state['next_player']])
                 
             # 如果回合結束但遊戲沒有結束，進入下一個街道
             if not self.is_game_end(simulated_state):
@@ -222,18 +228,23 @@ class MCTS:
         
         valid_probs = np.array(valid_probs)
         
-        valid_probs += 0.1
-        valid_probs[-1] = 0 # decrease probability of all_in
-        valid_probs[0] = 0 # decrease probability of fold
+        valid_probs += 1
+        valid_probs[-1] = 0.1 # decrease probability of all_in
+        valid_probs[0] -= 0.5 # decrease probability of fold
         valid_probs /= valid_probs.sum()
 
         print(f"valid_probs: {valid_probs}")
 
         action_index = np.random.choice(len(valid_probs), p=valid_probs)
         action, amount = valid_actions_expanded[action_index]
+        # if action is bet, convert it to raise, since the pokerengine only recognize raise
+        if action == ActionType.BET:
+            action = ActionType.RAISE
 
         # action, amount = self.get_action_from_type(action_index, game_state)
         print(f"action: {action}, amount: {amount}")
+
+        print(current_player)
 
         return avg_expected_values, policy_input, value_input, new_policy, self.convert_action_type(action), amount
     
