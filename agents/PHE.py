@@ -126,7 +126,7 @@ class PokerHandEvaluator:
         suit = card[-1]
         return f"{rank.zfill(2)}{suit}"  # Ensure rank is always two digits for consistency
 
-    def monte_carlo_simulation(self, known_cards, num_samples=1000):
+    def monte_carlo_simulation(self, known_cards, num_samples=10000):
         all_cards = [f"{rank}{suit}" for rank in range(2, 15) for suit in ['H', 'D', 'S', 'C']]
         remaining_cards = list(set(all_cards) - set(known_cards))
 
@@ -181,6 +181,52 @@ class PokerHandEvaluator:
             print("Please input 0 1 2 3 4 5 6 7 cards")
         avg_prob_matrix = total_prob_matrix / num_samples
         return avg_prob_matrix
+    
+    def clustering(self, prob_matrix):
+        # initialize a clustered array
+        straight_flush_clustered = np.zeros(1)
+        straight_flush_clustered[0] = np.sum(prob_matrix[:, 0])
+
+        four_clustered = np.zeros(1)
+        four_clustered[0] = np.sum(prob_matrix[:, 1])
+        # full house, sum up every 5 cards
+        full_house_clustered = np.zeros(3)
+        for i in range(2):
+            full_house_clustered[i] = prob_matrix[5*i, 2]+prob_matrix[5*i+1, 2]+prob_matrix[5*i+2, 2]+prob_matrix[5*i+3, 2]+prob_matrix[5*i+4, 2]
+        full_house_clustered[2] = prob_matrix[10, 2]+prob_matrix[11, 2]+prob_matrix[12, 2]
+        # flush, sum up every 4 cards
+        flush_clustered = np.zeros(4)
+        for i in range(3):
+            flush_clustered[i] = prob_matrix[4*i, 3]+prob_matrix[4*i+1, 3]+prob_matrix[4*i+2, 3]+prob_matrix[4*i+3, 3]
+        flush_clustered[3] = prob_matrix[12, 3]
+        # straight, sum up every 3 cards
+        straight_clustered = np.zeros(5)
+        for i in range(4):
+            straight_clustered[i] = prob_matrix[3*i, 4]+prob_matrix[3*i+1, 4]+prob_matrix[3*i+2, 4]
+        straight_clustered[4] = prob_matrix[12, 4]
+        # three of a kind, sum up every 3 cards
+        three_of_a_kind_clustered = np.zeros(5)
+        for i in range(4):
+            three_of_a_kind_clustered[i] = prob_matrix[3*i, 5]+prob_matrix[3*i+1, 5]+prob_matrix[3*i+2, 5]
+        three_of_a_kind_clustered[4] = prob_matrix[12, 5]
+        # two pair, sum up every 2 cards
+        two_pair_clustered = np.zeros(7)
+        for i in range(6):
+            two_pair_clustered[i] = prob_matrix[2*i, 6]+prob_matrix[2*i+1, 6]
+        two_pair_clustered[6] = prob_matrix[12, 6]
+        # pair, no need to cluster
+        pair_clusterd = np.zeros(13)
+        for i in range(13):
+            pair_clusterd[i] = prob_matrix[i, 7]
+        # high card, no need to cluster
+        high_card_clustered = np.zeros(13)
+        for i in range(13):
+            high_card_clustered[i] = prob_matrix[i, 8]
+
+        # concatenate
+        clustered_prob_matrix = np.concatenate((straight_flush_clustered, four_clustered, full_house_clustered, flush_clustered, straight_clustered, three_of_a_kind_clustered, two_pair_clustered, pair_clusterd, high_card_clustered))
+        return clustered_prob_matrix
+    
     def brutal_search(self, known_cards):
         total_prob_matrix = cp.zeros((13, 9)) if use_cuda else np.zeros((13, 9))
 

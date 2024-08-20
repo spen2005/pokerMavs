@@ -9,8 +9,8 @@ class PolicyNetwork(nn.Module):
         self.num_players = num_players
         
         # Calculate input dimension
-        hand_strength_dim = 13 * 9  # 13x9 matrix flattened
-        public_strength_dim = 13 * 9  # 13x9 matrix flattened
+        hand_strength_dim = 52  # 13x9 matrix flattened
+        public_strength_dim = 52 # 13x9 matrix flattened
         other_inputs = 5 + 2 * num_players
         input_dim = hand_strength_dim + public_strength_dim + other_inputs
         

@@ -173,7 +173,8 @@ class MCTS:
                 simulated_state = self.move_to_next_street(simulated_state)
             
                 value_input = self.prepare_value_input(simulated_state, hand_strengths)
-                payoffs = self.value_function.evaluate(*value_input)
+                now_stacks = [player.stack for player in simulated_state['table'].seats.players]
+                payoffs = np.array(self.value_function.evaluate(*value_input))-np.array(current_stacks)+np.array(now_stacks)
             else:
                 # if game ended, payoffs = the final stack - current stack
                 # print("game ended")
@@ -226,13 +227,12 @@ class MCTS:
 
         if regret_sum > 0:
             new_policy = positive_regrets / regret_sum
-        elif regret_sum == 0:
+        else:
+            new_policy = np.zeros(7)
             for i in range(7):
                 if action_count[i] != 0:
                     new_policy[i] = 1
             new_policy /= new_policy.sum()
-        else:
-            raise ValueError("regret_sum is negative")
 
         avg_expected_values = np.dot(old_policy, expected_values)
 
@@ -513,7 +513,7 @@ class MCTS:
         
         return hand_strengths_tensor, pot_tensor, round_tensor
 
-    def calculate_hand_strengths(self, game_state):
+    def calculate_hand_strengths(self, game_state, clustering = 1):
         hand_strengths = []
         for player in game_state['table'].seats.players:
             if hasattr(player, 'mcts_hole_card'):
@@ -523,13 +523,20 @@ class MCTS:
                 strength_matrix = self.phe.monte_carlo_simulation(known_cards)
             else:
                 strength_matrix = np.zeros((13, 9))  # 假設一個空的強度矩陣
+            
+            if clustering == 1:
+                strength_matrix = self.phe.clustering(strength_matrix)
             hand_strengths.append(strength_matrix)
         
         return hand_strengths
 
-    def calculate_public_strength(self, game_state):
+    def calculate_public_strength(self, game_state, clustering = 1):
         community_cards = game_state.get('mcts_community_card', [])
-        return self.phe.monte_carlo_simulation(community_cards)
+        strength_matrix = self.phe.monte_carlo_simulation(community_cards)
+        if clustering == 1:
+            return self.phe.clustering(strength_matrix)
+        else:
+            return strength_matrix
 
     def convert_cards_to_phe_format(self, cards):
         rank_map = {'A': '14', 'K': '13', 'Q': '12', 'J': '11', 'T': '10'}

@@ -26,10 +26,10 @@ def load_model(model, path):
 def save_model(model, path):
     torch.save(model.state_dict(), path)
 
-def train(num_episodes=100000, num_players=6, update_interval=2):
+def train(num_episodes=100000, num_players=6, update_interval=20):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     policy_network = PolicyNetwork(num_players=num_players).to(device)
-    value_function = ValueFunction(num_players=num_players, num_hand_categories=117).to(device)
+    value_function = ValueFunction(num_players=num_players, num_hand_categories=52).to(device)
     
     policy_optimizer = optim.Adam(policy_network.parameters())
     value_optimizer = optim.Adam(value_function.parameters())
@@ -78,7 +78,7 @@ def train(num_episodes=100000, num_players=6, update_interval=2):
             previous_state = game_state
 
             # 使用 MCTS 策略
-            avg_expected_values, policy_input, value_input, new_policy, action, amount = mcts.mcts_strategy(game_state, each_player_pay_before_this_street, episode)
+            avg_expected_values, policy_input, value_input, new_policy, action, amount = mcts.mcts_strategy(game_state, each_player_pay_before_this_street, episode, int(100+0.1*episode))
 
             # 應用動作
             print(f"convert_action_type: {mcts.convert_action_type(action)}")
@@ -113,7 +113,7 @@ def train(num_episodes=100000, num_players=6, update_interval=2):
 
         # 更新網絡
         if (episode + 1) % update_interval == 0:
-            policy_loss, value_loss = update_networks(policy_network, value_function, policy_optimizer, value_optimizer, policy_data, value_data, epochs=50)
+            policy_loss, value_loss = update_networks(policy_network, value_function, policy_optimizer, value_optimizer, policy_data, value_data, epochs=500)
             policy_data = []
             value_data = []
 
@@ -131,7 +131,7 @@ def train(num_episodes=100000, num_players=6, update_interval=2):
     print("\nTraining completed")
     writer.close()
 
-def update_networks(policy_network, value_function, policy_optimizer, value_optimizer, policy_data, value_data, epochs=25):
+def update_networks(policy_network, value_function, policy_optimizer, value_optimizer, policy_data, value_data, epochs=50):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     policy_network.to(device)
     value_function.to(device)
