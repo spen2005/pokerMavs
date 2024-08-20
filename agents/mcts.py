@@ -42,7 +42,7 @@ class MCTS:
         # 設置 Emulator 的初始狀態
         self.initial_state = initial_state
 
-    def act(self, game_state, hand_strengths, public_strength, each_player_pay_before_this_street, epsilon=0.1):    
+    def act(self, game_state, hand_strengths, public_strength, each_player_pay_before_this_street, first_action = 0, epsilon=0.00001):    
         '''
         print(f"Current street: {game_state['street']}")
         print(f"Current player: {game_state['next_player']}")
@@ -85,7 +85,13 @@ class MCTS:
         valid_probs /= valid_probs.sum()
 
         # 選擇動作
-        chosen_action_index = np.random.choice(len(valid_probs), p=valid_probs)
+        if first_action == 0:
+            chosen_action_index = np.random.choice(len(valid_probs), p=valid_probs)
+        else:
+            # if it is first action, we should uniformly choose one valid action, every action probability should be 1/len(valid_actions)
+            valid_probs = np.ones(len(valid_actions)) / len(valid_actions)
+            chosen_action_index = np.random.choice(len(valid_actions), p=valid_probs)
+
         chosen_action, chosen_amount = valid_actions_expanded[chosen_action_index]
 
         # chosen_amount should add current player paid sum, since the definition of pokerengine is not same as ours
@@ -148,7 +154,7 @@ class MCTS:
             street = simulated_state['street']
             # sample to the next street and evaluate the payoff using the value function
             # print(f"now street: {simulated_state['street']}")
-            first_action = self.act(simulated_state, hand_strengths, public_strength, each_player_pay_before_this_street, 0.1)
+            first_action = self.act(simulated_state, hand_strengths, public_strength, each_player_pay_before_this_street, 1, 0.00001)
 
             simulated_state, _ = self.emulator.apply_action(simulated_state, self.convert_action_type(first_action['action']), first_action['amount'])
             
@@ -193,16 +199,40 @@ class MCTS:
         old_policy = self.policy_network(policy_input).detach().cpu().numpy()
 
         current_player_expected_values = expected_values[:, current_player]
-        avg_expected_value = np.dot(old_policy, current_player_expected_values)
-        regrets = current_player_expected_values - avg_expected_value
+
+        # if action_count[i] == 0, implies that it is not a valid action, we should corrected old policy
+        # change old policy to valid size
+        if old_policy.ndim > 1:
+            old_policy = old_policy.flatten()
+
+        corrected_old_policy = np.zeros(7)
+        for i in range(7):
+            if action_count[i] != 0:
+                corrected_old_policy[i] = old_policy[i]
+        corrected_old_policy /= corrected_old_policy.sum()
+
+        avg_expected_value = np.dot(corrected_old_policy, current_player_expected_values)
+        # regrets = current_player_expected_values - avg_expected_value
+        # if action_count[i] == 0, implies that it is not a valid action, should not minus avg_expected_value
+        regrets = np.zeros(7)
+        for i in range(7):
+            if action_count[i] == 0:
+                regrets[i] = 0
+            else:
+                regrets[i] = current_player_expected_values[i] - avg_expected_value 
 
         positive_regrets = np.maximum(regrets, 0)
         regret_sum = np.sum(positive_regrets)
 
         if regret_sum > 0:
             new_policy = positive_regrets / regret_sum
+        elif regret_sum == 0:
+            for i in range(7):
+                if action_count[i] != 0:
+                    new_policy[i] = 1
+            new_policy /= new_policy.sum()
         else:
-            new_policy = np.ones_like(old_policy) / len(old_policy)
+            raise ValueError("regret_sum is negative")
 
         avg_expected_values = np.dot(old_policy, expected_values)
 
@@ -211,6 +241,7 @@ class MCTS:
 
         # print(f"expected_values:\n {expected_values}")
         print(f"current_expected_value:\n{current_player_expected_values}")
+        print(f"action_count:\n{action_count}")
         print(f"old_policy:\n {old_policy}")
         print(f"avg_expected_values:\n {avg_expected_value}")
         # print regrets 取到小數點第二位

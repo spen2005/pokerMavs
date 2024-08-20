@@ -26,7 +26,7 @@ def load_model(model, path):
 def save_model(model, path):
     torch.save(model.state_dict(), path)
 
-def train(num_episodes=100000, num_players=6, update_interval=5):
+def train(num_episodes=100000, num_players=6, update_interval=2):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     policy_network = PolicyNetwork(num_players=num_players).to(device)
     value_function = ValueFunction(num_players=num_players, num_hand_categories=117).to(device)
@@ -43,6 +43,8 @@ def train(num_episodes=100000, num_players=6, update_interval=5):
 
     # Initialize TensorBoard writer
     writer = SummaryWriter(log_dir="runs/poker_training")
+
+    each_players_stack_sum = np.zeros(num_players)
 
     for episode in range(num_episodes):
         print(f"Episode {episode + 1}")
@@ -92,17 +94,26 @@ def train(num_episodes=100000, num_players=6, update_interval=5):
             
             print(f"Street: {game_state['street']}")
             print("Players' stack:")
+
             for player in game_state['table'].seats.players:
                 print(f"{player.name}: {player.stack}")
-
-
+                
             # 收集訓練數據
             policy_data.append((policy_input, new_policy))
             value_data.append((value_input, avg_expected_values))
         
+        # 计算每位选手的平均剩余筹码
+        for i, player in enumerate(game_state['table'].seats.players):
+            each_players_stack_sum[i] += player.stack
+            average_stack = each_players_stack_sum[i] / (episode + 1)
+            print("=============")
+            print(f"player_{i}_average_stack: {average_stack}")
+            print("=============")
+            writer.add_scalar(f'Average_Stack/player_{i}', average_stack, episode + 1)
+
         # 更新網絡
         if (episode + 1) % update_interval == 0:
-            policy_loss, value_loss = update_networks(policy_network, value_function, policy_optimizer, value_optimizer, policy_data, value_data, epochs=25)
+            policy_loss, value_loss = update_networks(policy_network, value_function, policy_optimizer, value_optimizer, policy_data, value_data, epochs=50)
             policy_data = []
             value_data = []
 
@@ -141,6 +152,8 @@ def update_networks(policy_network, value_function, policy_optimizer, value_opti
         for inputs, target in value_data:
             inputs, target = [i.to(device) for i in inputs], torch.tensor(target, dtype=torch.float32).to(device)
             output = value_function(*inputs)
+            if target.dim() == 1:
+                target = target.unsqueeze(0)  # Ensure target has the same shape as output
             value_loss += F.mse_loss(output, target)
         value_loss /= len(value_data)
         value_loss.backward()
