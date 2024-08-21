@@ -138,8 +138,10 @@ class MCTS:
 
         # calculate hand strengths for each player
         hand_strengths = self.calculate_hand_strengths(game_state)
+        # print(f"hand_strengths: {hand_strengths}")
         # calculate public strength
         public_strength = self.calculate_public_strength(game_state)
+        # print(f"public_strength: {public_strength}")
         # If hand_strengths is a list of NumPy arrays, convert it to a single NumPy array
         if isinstance(hand_strengths, list) and isinstance(hand_strengths[0], np.ndarray):
             hand_strengths = np.array(hand_strengths)
@@ -494,10 +496,11 @@ class MCTS:
             torch.tensor([player.stack for player in game_state['table'].seats.players], 
                          dtype=torch.float32)
         ])
-        
-        return policy_input.unsqueeze(0).to(self.device)  # Add batch dimension and move to the correct device
+        return policy_input.unsqueeze(0).to(self.device)
     
     def prepare_value_input(self, game_state, hand_strengths):
+
+        # print(f"hand_strengths: {hand_strengths}")
         # Convert NumPy arrays to PyTorch tensors if necessary
         if isinstance(hand_strengths, np.ndarray):
             hand_strengths_tensor = torch.from_numpy(hand_strengths).float().to(self.device)
@@ -511,18 +514,20 @@ class MCTS:
         pot_tensor = torch.tensor([[pot]], dtype=torch.float32).to(self.device)
         round_tensor = torch.tensor([[round]], dtype=torch.float32).to(self.device)
         
+        # print(f"hand_strengths_tensor: {hand_strengths_tensor}")
+        # print(f"pot_tensor: {pot_tensor}")
+        # print(f"round_tensor: {round_tensor}")
+
         return hand_strengths_tensor, pot_tensor, round_tensor
 
     def calculate_hand_strengths(self, game_state, clustering = 1):
         hand_strengths = []
         for player in game_state['table'].seats.players:
-            if hasattr(player, 'mcts_hole_card'):
-                hole_cards = player.mcts_hole_card
-                community_cards = game_state.get('mcts_community_card', [])
-                known_cards = hole_cards + community_cards
-                strength_matrix = self.phe.monte_carlo_simulation(known_cards)
-            else:
-                strength_matrix = np.zeros((13, 9))  # 假設一個空的強度矩陣
+            hole_cards = player.hole_card
+            all_cards = hole_cards + game_state.get('community_card', [])
+            all_cards = self.convert_cards_to_phe_format(all_cards)
+            # print(f"all_cards: {all_cards}")
+            strength_matrix = self.phe.monte_carlo_simulation(all_cards)
             
             if clustering == 1:
                 strength_matrix = self.phe.clustering(strength_matrix)
@@ -532,6 +537,8 @@ class MCTS:
 
     def calculate_public_strength(self, game_state, clustering = 1):
         community_cards = game_state.get('mcts_community_card', [])
+        # print(f"community_cards: {community_cards}")
+        community_cards = self.convert_cards_to_phe_format(community_cards)
         strength_matrix = self.phe.monte_carlo_simulation(community_cards)
         if clustering == 1:
             return self.phe.clustering(strength_matrix)

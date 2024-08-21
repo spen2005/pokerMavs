@@ -26,7 +26,7 @@ def load_model(model, path):
 def save_model(model, path):
     torch.save(model.state_dict(), path)
 
-def train(num_episodes=100000, num_players=6, update_interval=20):
+def train(num_episodes=1000, num_players=6, update_interval=5):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     policy_network = PolicyNetwork(num_players=num_players).to(device)
     value_function = ValueFunction(num_players=num_players, num_hand_categories=52).to(device)
@@ -100,7 +100,10 @@ def train(num_episodes=100000, num_players=6, update_interval=20):
                 
             # 收集訓練數據
             policy_data.append((policy_input, new_policy))
-            value_data.append((value_input, avg_expected_values))
+
+            if(game_state['street'] != previous_state['street']):
+                # print(f"value_input: {value_input}")
+                value_data.append((value_input, avg_expected_values))
         
         # 计算每位选手的平均剩余筹码
         for i, player in enumerate(game_state['table'].seats.players):
@@ -113,7 +116,7 @@ def train(num_episodes=100000, num_players=6, update_interval=20):
 
         # 更新網絡
         if (episode + 1) % update_interval == 0:
-            policy_loss, value_loss = update_networks(policy_network, value_function, policy_optimizer, value_optimizer, policy_data, value_data, epochs=500)
+            policy_loss, value_loss = update_networks(policy_network, value_function, policy_optimizer, value_optimizer, policy_data, value_data)
             policy_data = []
             value_data = []
 
@@ -131,7 +134,7 @@ def train(num_episodes=100000, num_players=6, update_interval=20):
     print("\nTraining completed")
     writer.close()
 
-def update_networks(policy_network, value_function, policy_optimizer, value_optimizer, policy_data, value_data, epochs=50):
+def update_networks(policy_network, value_function, policy_optimizer, value_optimizer, policy_data, value_data, epochs=150):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     policy_network.to(device)
     value_function.to(device)
@@ -142,7 +145,8 @@ def update_networks(policy_network, value_function, policy_optimizer, value_opti
         for inputs, target in policy_data:
             inputs, target = inputs.to(device), torch.tensor(target, dtype=torch.float32).to(device)
             output = policy_network(inputs)
-            policy_loss += F.kl_div(output.log(), target, reduction='batchmean')
+            # mse loss
+            policy_loss += F.mse_loss(output, target)
         policy_loss /= len(policy_data)
         policy_loss.backward()
         policy_optimizer.step()
